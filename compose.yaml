@@ -6,8 +6,6 @@ services:
     restart: unless-stopped
     ports:
       - "3100:3100"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - manager-data:/app/data
 volumes:
