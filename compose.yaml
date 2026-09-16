@@ -11,7 +11,9 @@ services:
       MANAGER_USER: ${MANAGER_USER:-admin}
       MANAGER_PASSWORD: ${MANAGER_PASSWORD:?Set MANAGER_PASSWORD in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3100}
-      WARP_PROXY_URL: socks5://warp:1080
+      WARP_PROXY_URL: ${WARP_PROXY_URL:-socks5://warp:1080}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes: ["manager-data:/app/data"]
   warp:
     profiles: [warp]
