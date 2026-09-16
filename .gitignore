@@ -1,0 +1,11 @@
+reference-proxy/
+reference-nuvio-tv/
+node_modules/
+data/
+.env
+*.log
+reference-backend/
+reference-smart/
+reference-mobile/
+reference-public/
+public-login-reference.html

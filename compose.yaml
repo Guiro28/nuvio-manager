@@ -1,0 +1,41 @@
+name: nuvio-manager
+services:
+  manager:
+    image: ${NUVIO_MANAGER_IMAGE:-ghcr.io/guiro28/nuvio-manager:latest}
+    build: .
+    restart: unless-stopped
+    ports: ["127.0.0.1:3100:3100"]
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3100
+      MANAGER_USER: ${MANAGER_USER:-admin}
+      MANAGER_PASSWORD: ${MANAGER_PASSWORD:?Set MANAGER_PASSWORD in .env}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3100}
+      WARP_PROXY_URL: socks5://warp:1080
+    volumes: ["manager-data:/app/data"]
+  warp:
+    profiles: [warp]
+    image: caomingjun/warp
+    restart: unless-stopped
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    ports: ["127.0.0.1:40000:1080"]
+    environment:
+      WARP_SLEEP: 2
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 0
+      net.ipv4.conf.all.src_valid_mark: 1
+    volumes: ["warp-data:/var/lib/cloudflare-warp"]
+    healthcheck:
+      test:
+        [
+          CMD-SHELL,
+          "curl -fsS --max-time 8 --socks5 localhost:1080 https://cloudflare.com/cdn-cgi/trace | grep -Eq '^warp=(on|plus)'",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+volumes:
+  manager-data:
+  warp-data:

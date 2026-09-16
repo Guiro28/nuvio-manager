@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Nuvio Manager</title>
+    <meta
+      name="description"
+      content="Gérez vos profils Nuvio, vos addons et vos paramètres TV et Mobile."
+    />
+    <link rel="icon" type="image/png" href="/assets/favicon.png" />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/aurora.css" />
+    <script src="/app.js" type="module"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside>
+        <a class="brand" href="/"
+          ><img class="brand-logo" src="/assets/nuvio-manager-logo.png" alt="" width="52" height="52"
+          ><span>nuvio<span class="brand-sub">MANAGER</span></span></a
+        >
+        <nav id="nav">
+          <button data-page="profiles" class="active">
+            <span>▦</span> Comptes & profils</button
+          ><button data-page="statistics"><span>▥</span> Statistiques</button
+          ><button data-page="library">
+            <span>⊞</span> Bibliothèque d’addons</button
+          ><button data-page="copy"><span>⇄</span> Copier des paramètres</button
+          ><button data-page="proxy"><span>⇢</span> Proxy & WARP</button
+          ><button data-page="backups"><span>↶</span> Sauvegardes</button>
+          <button data-page="settings"><span>⚙</span> Paramètres</button>
+        </nav>
+      </aside>
+      <main>
+        <header>
+          <div class="breadcrumb">
+            Espace personnel <span>/</span>
+            <span id="crumb">Comptes & profils</span>
+          </div>
+          <div class="header-actions"><button id="theme-toggle" type="button" aria-label="Passer en mode clair">☀ Mode clair</button><button id="logout" class="quiet">Déconnexion</button></div>
+        </header>
+        <div id="content" aria-live="polite">
+          <p>Chargement du dashboard…</p>
+        </div>
+      </main>
+    </div>
+    <div id="toast" role="status" hidden></div>
+    <dialog id="dialog"></dialog>
+  </body>
+</html>

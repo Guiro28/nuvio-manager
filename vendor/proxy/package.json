@@ -1,0 +1,19 @@
+{
+  "name": "stremio-proxy",
+  "version": "1.0.0",
+  "description": "Addon-proxy Stremio : proxifie les flux video HTTP/HTTPS des addons via l'IP du serveur (ou WARP/SOCKS5).",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.5",
+    "socks-proxy-agent": "^8.0.4"
+  }
+}

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connexion — Stremio Addon Proxy</title>
+  <style>
+    :root {
+      --bg: #0f1220; --card: #191d33; --line: #2a2f4a;
+      --fg: #e8eaf5; --muted: #9aa0c0; --accent: #7c5cff; --danger: #ff5c7c;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, #24284a, var(--bg)); color: var(--fg); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+      padding: 32px 28px; width: 92%; max-width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+    h1 { font-size: 20px; margin: 0 0 4px; text-align: center; }
+    .sub { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 22px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+    input { width: 100%; padding: 11px 12px; background: #0d1022; color: var(--fg);
+      border: 1px solid var(--line); border-radius: 9px; font-size: 14px; }
+    input:focus { outline: none; border-color: var(--accent); }
+    button { width: 100%; cursor: pointer; border: 0; border-radius: 9px; padding: 12px; margin-top: 22px;
+      font-size: 14px; font-weight: 600; color: #fff; background: var(--accent); }
+    button:disabled { opacity: .6; cursor: default; }
+    .err { color: var(--danger); font-size: 13px; margin-top: 14px; min-height: 18px; text-align: center; }
+  </style>
+</head>
+<body>
+  <form class="card" id="form">
+    <h1>🎬 Stremio Addon Proxy</h1>
+    <p class="sub" data-i18n="loginSub"></p>
+    <label for="user" data-i18n="user"></label>
+    <input id="user" name="user" autocomplete="username" autofocus />
+    <label for="pass" data-i18n="password"></label>
+    <input id="pass" name="pass" type="password" autocomplete="current-password" />
+    <button type="submit" id="btn" data-i18n="signIn"></button>
+    <div class="err" id="err"></div>
+  </form>
+
+  <script src="/i18n.js"></script>
+  <script>
+    I18n.apply(); // détection auto + choix mémorisé (partagé avec le dashboard)
+    const form = document.getElementById('form');
+    const btn = document.getElementById('btn');
+    const err = document.getElementById('err');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      btn.disabled = true; btn.textContent = I18n.t('connecting');
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: document.getElementById('user').value, pass: document.getElementById('pass').value })
+        });
+        if (r.ok) { window.location.href = '/'; return; }
+        const d = await r.json().catch(() => ({}));
+        err.textContent = d.error || I18n.t('loginFailed');
+      } catch (e) {
+        err.textContent = I18n.t('netError');
+      }
+      btn.disabled = false; btn.textContent = I18n.t('signIn');
+    });
+  </script>
+</body>
+</html>

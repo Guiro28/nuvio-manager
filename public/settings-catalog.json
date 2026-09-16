@@ -1,0 +1,1411 @@
+{
+  "tv": [
+    {
+      "feature": "animeskip_settings",
+      "key": "animeskip_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "cloud_library_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_description_template",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_name_template",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "instant_playback_preparation_limit",
+      "type": "int"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "preferred_resolver_provider_id",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "stream_codec_filter",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "stream_dolby_vision_filter",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "stream_hdr_filter",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "stream_max_results",
+      "type": "int"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "stream_minimum_quality",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "stream_preferences",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "stream_sort_mode",
+      "type": "string"
+    },
+    {
+      "feature": "experience_settings",
+      "key": "addon_setup_skipped",
+      "type": "boolean"
+    },
+    {
+      "feature": "experience_settings",
+      "key": "mode",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "blur_continue_watching_next_up",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "blur_unwatched_episodes",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_cast_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_continue_watching_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_edge_coverage",
+      "type": "int"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_edge_strength",
+      "type": "int"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_episode_cards_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_posters_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_sheen_strength",
+      "type": "int"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "card_depth_trailers_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "catalog_addon_name_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "catalog_type_suffix_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "classic_focus_gradient_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "compose_highlighter_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "continue_watching_card_style",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "continue_watching_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "continue_watching_sort_mode",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "detail_imdb_ratings_visibility",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "detail_page_trailer_button_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "discover_location",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "episode_options_overlay_style",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "fast_horizontal_navigation_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "focused_poster_backdrop_expand_delay_seconds",
+      "type": "int"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "focused_poster_backdrop_expand_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "focused_poster_backdrop_trailer_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "focused_poster_backdrop_trailer_muted",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "focused_poster_backdrop_trailer_playback_target",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "follow_addons_order",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "glass_sidepanel_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "has_chosen_layout",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "hero_catalog_key",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "hero_catalog_keys",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "hero_section_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "hide_unreleased_content",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "home_imdb_ratings_visibility",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "memory_only_vertical_scroll",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "modern_hero_full_screen_backdrop",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "modern_landscape_posters_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "modern_sidebar_blur_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "modern_sidebar_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "next_up_from_furthest_episode",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "poster_card_corner_radius_dp",
+      "type": "int"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "poster_card_height_dp",
+      "type": "int"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "poster_card_width_dp",
+      "type": "int"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "poster_labels_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "prefer_external_meta_addon_detail",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "selected_layout",
+      "type": "string"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "show_full_release_date",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "show_unaired_next_up",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "sidebar_collapsed_by_default",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "smooth_bring_into_view_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "startup_splash_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "layout_settings",
+      "key": "use_episode_thumbnails_in_cw",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_show_audience",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_show_imdb",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_show_letterboxd",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_show_mal",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_show_metacritic",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_show_tmdb",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_show_tomatoes",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_show_trakt",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "auto_skip_segment_types",
+      "type": "string_set"
+    },
+    {
+      "feature": "player_settings",
+      "key": "loading_overlay_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "mpv_hi10p_gnext_software_fallback_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "next_episode_threshold_minutes_before_end",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "next_episode_threshold_minutes_before_end_v2",
+      "type": "float"
+    },
+    {
+      "feature": "player_settings",
+      "key": "next_episode_threshold_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "next_episode_threshold_percent",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "next_episode_threshold_percent_v2",
+      "type": "float"
+    },
+    {
+      "feature": "player_settings",
+      "key": "osd_clock_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "parental_guide_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "pause_overlay_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "playback_issue_reports_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "post_play_movie_threshold_percent",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "post_play_recommendations_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "preferred_audio_language",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "secondary_preferred_audio_language",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "show_player_loading_status",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "skip_intro_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "skip_silence",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "still_watching_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "still_watching_episode_threshold",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_next_episode_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_next_episode_fallback_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_prefer_bingegroup_next_episode",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_regex",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_reuse_binge_group",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_selected_addons",
+      "type": "string_set"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_selected_plugins",
+      "type": "string_set"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_source",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_timeout_seconds",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_reuse_last_link_cache_hours",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_reuse_last_link_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_background_color",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_bold",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_organization_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_outline_color",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_outline_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_outline_width",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_preferred_language",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_secondary_language",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_show_only_preferred_languages",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_size",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_strip_sdh",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_text_color",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_use_forced_subtitles",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_vertical_offset",
+      "type": "int"
+    },
+    {
+      "feature": "stream_badge_settings",
+      "key": "debrid_stream_badge_rules",
+      "type": "string"
+    },
+    {
+      "feature": "stream_badge_settings",
+      "key": "show_addon_logo",
+      "type": "boolean"
+    },
+    {
+      "feature": "stream_badge_settings",
+      "key": "show_file_size_badges",
+      "type": "boolean"
+    },
+    {
+      "feature": "stream_badge_settings",
+      "key": "stream_badge_placement",
+      "type": "string"
+    },
+    {
+      "feature": "stream_badge_settings",
+      "key": "stream_badge_rules",
+      "type": "string"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "amoled_mode",
+      "type": "boolean"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "amoled_surfaces_mode",
+      "type": "boolean"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "custom_theme_colors",
+      "type": "string"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "selected_font",
+      "type": "string"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "selected_theme",
+      "type": "string"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "settings_ui_style",
+      "type": "string"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_enrich_continue_watching",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_language",
+      "type": "string"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_modern_home_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_artwork",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_basic_info",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_collections",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_credits",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_details",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_episodes",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_more_like_this",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_networks",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_productions",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_release_dates",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_trailers",
+      "type": "boolean"
+    },
+    {
+      "feature": "track_preference",
+      "key": "$field|$contentId",
+      "type": "string"
+    },
+    {
+      "feature": "track_preference",
+      "key": "$field|$id",
+      "type": "float"
+    },
+    {
+      "feature": "trailer_settings",
+      "key": "trailer_delay_seconds",
+      "type": "int"
+    },
+    {
+      "feature": "trailer_settings",
+      "key": "trailer_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "continue_watching_days_cap",
+      "type": "int"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "dismissed_next_up_keys",
+      "type": "string_set"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "library_source_mode",
+      "type": "string"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "more_like_this_source",
+      "type": "string"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "next_up_from_furthest_episode",
+      "type": "boolean"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "show_meta_comments",
+      "type": "boolean"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "show_unaired_next_up",
+      "type": "boolean"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "simkl_anime_id_preference",
+      "type": "string"
+    },
+    {
+      "feature": "trakt_settings",
+      "key": "watch_progress_source",
+      "type": "string"
+    }
+  ],
+  "mobile": [
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_cloud_library_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_instant_playback_preparation_limit",
+      "type": "int"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_preferred_resolver_provider_id",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_codec_filter",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_description_template",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_dolby_vision_filter",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_hdr_filter",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_max_results",
+      "type": "int"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_minimum_quality",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_name_template",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_preferences",
+      "type": "string"
+    },
+    {
+      "feature": "debrid_settings",
+      "key": "debrid_stream_sort_mode",
+      "type": "string"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_api_key",
+      "type": "string"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_use_audience",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_use_imdb",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_use_letterboxd",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_use_mal",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_use_metacritic",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_use_tmdb",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_use_tomatoes",
+      "type": "boolean"
+    },
+    {
+      "feature": "mdblist_settings",
+      "key": "mdblist_use_trakt",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "android_libmpv_hardware_decoding_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "android_libmpv_video_output",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "android_libmpv_yuv420p_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "android_playback_engine",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "animeskip_client_id",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "animeskip_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "decoder_priority",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "external_player_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "external_player_forward_subtitles",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "external_player_id",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "external_player_send_skip_segments",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "hold_to_speed_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "hold_to_speed_value",
+      "type": "float"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_audio_output_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_brightness",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_contrast",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_deband_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_extended_dynamic_range_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_gamma",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_hardware_decoder_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_hdr_compute_peak_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_interpolation_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_saturation",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_target_colorspace_hint_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_target_primaries",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_target_transfer",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_tone_mapping_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "ios_video_output_preset",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "libass_render_type",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "map_dv7_to_hevc",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "next_episode_threshold_minutes_before_end_v2",
+      "type": "float"
+    },
+    {
+      "feature": "player_settings",
+      "key": "next_episode_threshold_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "next_episode_threshold_percent_v2",
+      "type": "float"
+    },
+    {
+      "feature": "player_settings",
+      "key": "pause_overlay_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "preferred_audio_language",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "preferred_subtitle_language",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "resize_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "secondary_preferred_audio_language",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "secondary_preferred_subtitle_language",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "show_loading_overlay",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "show_parental_guide",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "show_player_loading_status",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "skip_intro_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_mode",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_next_episode_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_next_episode_fallback_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_prefer_binge_group",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_regex",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_reuse_binge_group",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_selected_addons",
+      "type": "string_set"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_selected_plugins",
+      "type": "string_set"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_source",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_auto_play_timeout_seconds",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_reuse_last_link_cache_hours",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "stream_reuse_last_link_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_background_color",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_bold",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_bottom_offset",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_font_size_sp",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_outline_color",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_outline_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_outline_width",
+      "type": "int"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_show_only_preferred_languages",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_strip_sdh",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_text_color",
+      "type": "string"
+    },
+    {
+      "feature": "player_settings",
+      "key": "subtitle_use_forced_subtitles",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "touch_gestures_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "tunneling_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "player_settings",
+      "key": "use_libass",
+      "type": "boolean"
+    },
+    {
+      "feature": "stream_badge_settings",
+      "key": "show_file_size_badges",
+      "type": "boolean"
+    },
+    {
+      "feature": "stream_badge_settings",
+      "key": "stream_badge_placement",
+      "type": "string"
+    },
+    {
+      "feature": "stream_badge_settings",
+      "key": "stream_badge_rules",
+      "type": "string"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "amoled_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "custom_theme_colors",
+      "type": "string"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "liquid_glass_native_tab_bar_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "nav_bar_glow_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "nav_bar_style",
+      "type": "string"
+    },
+    {
+      "feature": "theme_settings",
+      "key": "selected_theme",
+      "type": "string"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_api_key",
+      "type": "string"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_enabled",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_language",
+      "type": "string"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_artwork",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_basic_info",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_collections",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_credits",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_details",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_episodes",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_more_like_this",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_networks",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_productions",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_release_dates",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_season_posters",
+      "type": "boolean"
+    },
+    {
+      "feature": "tmdb_settings",
+      "key": "tmdb_use_trailers",
+      "type": "boolean"
+    }
+  ]
+}

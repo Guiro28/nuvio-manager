@@ -1,0 +1,7 @@
+.git
+.env
+data
+reference-*
+public-login-reference.html
+node_modules
+tests
