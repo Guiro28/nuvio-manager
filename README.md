@@ -84,6 +84,24 @@ L’entrée `host.docker.internal` est configurée par `compose.yaml`, y compris
 
 L’adresse du proxy se règle uniquement dans le dashboard. Aucun redémarrage du conteneur n’est nécessaire pour la remplacer ou la désactiver.
 
+### Variante Docker avec WARP inclus
+
+Le fichier `compose.warp.yaml` lance le dashboard et un conteneur WARP sur le même réseau privé :
+
+```sh
+docker compose -f compose.warp.yaml pull
+docker compose -f compose.warp.yaml up -d
+docker logs nuvio-manager
+```
+
+Dans **Paramètres > Proxy externe**, enregistrer puis tester cette adresse :
+
+```text
+socks5://warp:1080
+```
+
+Le port SOCKS5 n’est pas publié sur l’hôte. Il reste accessible uniquement entre les deux conteneurs. Les deux fichiers Compose utilisent le même nom de projet et le même volume `manager-data`, ce qui permet de passer de la variante simple à la variante WARP sans perdre les données du dashboard.
+
 ## Fonctions
 
 - Plusieurs comptes par appairage officiel Nuvio, renouvellement des sessions côté serveur.
