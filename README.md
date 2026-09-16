@@ -1,6 +1,6 @@
 # Nuvio Manager
 
-Dashboard privé en français pour les comptes Nuvio. Node.js 24. Le moteur réseau de `stremio-addon-proxy` est intégré au serveur afin de choisir une sortie directe ou WARP pour chaque addon.
+Dashboard privé en français pour les comptes Nuvio. Node.js 24. Le moteur réseau de `stremio-addon-proxy` est intégré au serveur afin de choisir une sortie directe ou un proxy externe pour chaque addon.
 
 ## Développement local
 
@@ -9,7 +9,9 @@ npm ci
 npm run dev
 ```
 
-Ouvrir http://localhost:3100. Par défaut, le serveur écoute uniquement sur `127.0.0.1`. Copier `.env.example` vers `.env` pour configurer un mot de passe, WARP ou le domaine public.
+Ouvrir http://localhost:3100. Par défaut, le serveur écoute uniquement sur `127.0.0.1` en développement.
+
+Lors de la première ouverture, récupérer le code affiché dans le terminal, puis créer l’administrateur et confirmer l’adresse du dashboard dans l’assistant.
 
 La connexion au site nuvio.tv dans un navigateur n’est pas automatiquement partagée avec le dashboard : cliquer **Connecter un compte** et valider le code sur Nuvio. Les tokens sont conservés chiffrés dans `data/`, jamais dans le navigateur ni dans Git.
 
@@ -29,25 +31,23 @@ docker run -d \
   --name nuvio-manager \
   --restart unless-stopped \
   -p 127.0.0.1:3100:3100 \
-  -e MANAGER_USER=admin \
-  -e MANAGER_PASSWORD='remplacez-par-un-mot-de-passe-long' \
-  -e PUBLIC_URL='https://manager.votre-domaine' \
   -v nuvio-manager-data:/app/data \
   ghcr.io/guiro28/nuvio-manager:latest
 ```
 
-Cette commande lance le proxy direct intégré au dashboard. Pour WARP, utiliser le fichier Compose afin d’ajouter uniquement le conteneur réseau WARP.
+Cette commande lance le dashboard et son proxy direct intégré. Aucun fichier `.env` n’est requis.
 
-1. Copier `.env.example` vers `.env`.
-2. Définir `MANAGER_PASSWORD` et `PUBLIC_URL=https://votre-domaine` (sans slash final).
-3. Se connecter à GHCR avec un jeton `read:packages`, puis démarrer :
+1. Se connecter à GHCR avec un jeton `read:packages`.
+2. Démarrer le dashboard.
+3. Lire le code de première configuration.
 
 ```sh
 docker compose pull
-docker compose --profile warp up -d
+docker compose up -d
+docker logs nuvio-manager
 ```
 
-Sans WARP : `docker compose up -d`. Pour construire localement au lieu d’utiliser l’image publiée : `docker compose --profile warp up -d --build`. Placer un reverse proxy HTTPS devant `127.0.0.1:3100`. Exemple Caddy :
+Ouvrir ensuite le domaine du dashboard. L’assistant demande le code affiché dans les journaux, le nom d’utilisateur, le mot de passe administrateur et l’adresse publique. Placer un reverse proxy HTTPS devant `127.0.0.1:3100`. Exemple Caddy :
 
 ```caddy
 manager.example.com {
@@ -80,11 +80,9 @@ Si le SOCKS5 de WARP est déjà publié sur un port de l’hôte accessible aux 
 socks5://host.docker.internal:40000
 ```
 
-L’entrée `host.docker.internal` est configurée par `compose.yaml`, y compris sous Docker Engine Linux. Un port publié uniquement sur `127.0.0.1` de l’hôte n’est généralement pas joignable depuis un conteneur ; le réseau Docker partagé évite d’exposer ce port. Ne pas activer le profil `warp` lorsque le conteneur existant est utilisé. Contrôler ensuite la connexion et l’IP de sortie depuis **Proxy**.
+L’entrée `host.docker.internal` est configurée par `compose.yaml`, y compris sous Docker Engine Linux. Un port publié uniquement sur `127.0.0.1` de l’hôte n’est généralement pas joignable depuis un conteneur ; le réseau Docker partagé évite d’exposer ce port. Contrôler ensuite la connexion et l’IP de sortie depuis **Proxy**.
 
-`WARP_PROXY_URL` reste disponible comme valeur initiale ou solution de secours définie par l’environnement. Dès qu’une adresse est enregistrée ou désactivée depuis le dashboard, le réglage chiffré du panel prend la priorité.
-
-En développement, le proxy direct fonctionne dans `npm run dev`. Pour tester WARP, lancer `docker compose --profile warp up -d warp` ; sa sortie SOCKS5 est exposée sur `127.0.0.1:40000`. WARP nécessite Docker/Linux et `/dev/net/tun`.
+L’adresse du proxy se règle uniquement dans le dashboard. Aucun redémarrage du conteneur n’est nécessaire pour la remplacer ou la désactiver.
 
 ## Fonctions
 
@@ -94,7 +92,7 @@ En développement, le proxy direct fonctionne dans `npm run dev`. Pour tester WA
 - Association facultative d’un compte Trakt et/ou Simkl à chaque profil Nuvio par code d’appareil, sans transmettre le mot de passe au dashboard.
 - Édition des paramètres synchronisés ATV et Mobile, champs typés et JSON avancé ; préservation des clés inconnues.
 - Gestion des addons et plugins par profil, activation et ordre.
-- Catalogue d’addons indépendant ; attribution manuelle sans proxy, via proxy direct ou via WARP.
+- Catalogue d’addons indépendant ; attribution manuelle sans proxy, via proxy direct ou via un proxy externe HTTP/SOCKS.
 - Copie entre comptes et profils, plateformes entières ou paramètres précis ; remplacement ou fusion des listes.
 - Aperçu avant application ; sauvegarde chiffrée du compte cible ; contrôle des modifications concurrentes. Le RPC protégé Nuvio est requis pour écrire les paramètres : aucune dégradation silencieuse vers une écriture non protégée.
 - Exports de sauvegarde JSON au format renvoyé par Nuvio. La restauration globale n’est pas automatisée.
@@ -117,9 +115,9 @@ Voir `docs/integration-notes.md` pour les sources examinées. Aucune modificatio
 
 ### Paramètres du panel
 
-Le menu Paramètres permet d’enregistrer une clé TMDB et de modifier les identifiants administrateur. La clé est chiffrée dans data/panel-settings.enc ; le mot de passe est haché avec scrypt et un sel aléatoire. Les identifiants enregistrés prennent priorité sur MANAGER_USER et MANAGER_PASSWORD après redémarrage. Les variables d’environnement servent à initialiser l’accès. La sortie WARP intégrée se configure avec `WARP_PROXY_URL`.
+Le menu Paramètres permet d’enregistrer l’adresse publique, le proxy externe, une clé TMDB et de modifier les identifiants administrateur. Les secrets sont chiffrés dans `data/panel-settings.enc` ; le mot de passe est haché avec scrypt et un sel aléatoire. Aucun identifiant administrateur ni réglage réseau sensible n’est requis dans les variables d’environnement.
 
-En développement sans authentification, définir un mot de passe active la connexion. Une modification des identifiants révoque toutes les autres sessions.
+Une modification des identifiants révoque toutes les autres sessions. Sur une installation neuve, le code de configuration change à chaque redémarrage tant que l’administrateur n’a pas été créé.
 
 La clé TMDB enrichit les onglets Progression, Bibliothèque, Déjà vus et Statistiques. Les identifiants IMDb synchronisés par Nuvio sont résolus via TMDB et le dashboard affiche le titre français, la jaquette, le résumé, l’année, les genres et la note. Les réponses sont mises en cache pendant sept jours dans data/tmdb-cache.enc. Une erreur TMDB n’empêche jamais l’affichage des données Nuvio.
 

@@ -110,6 +110,7 @@ async function api(route, data) {
   const b = await r.json();
   if (!r.ok) {
     if (r.status === 401 && !route.startsWith("pair")) login();
+    if (r.status === 428 && route !== "setup") setup();
     throw Error(
       b.error +
         (b.partial
@@ -1155,6 +1156,34 @@ function login() {
     }
   };
 }
+function setup(publicUrlOnly = false) {
+  openDialog(
+    `<div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="76" height="76"><div><h2>${publicUrlOnly ? "Configurer l’adresse publique" : "Créer l’administrateur"}</h2><p class="muted">${publicUrlOnly ? "Finalisez la migration de votre dashboard." : "Première configuration de votre dashboard privé."}</p></div></div><form id="setup-form" class="form"><label>Code de configuration<input name="code" autocomplete="one-time-code" maxlength="32" placeholder="Code affiché dans les journaux Docker" required></label>${publicUrlOnly ? "" : '<label>Nom d’utilisateur<input name="username" autocomplete="username" maxlength="80" required></label><label>Mot de passe<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label><label>Confirmer le mot de passe<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label>'}<label>Adresse publique du dashboard<input name="publicUrl" type="url" value="${esc(location.origin)}" autocomplete="off" required></label><p class="muted">Récupérez le code avec <code>docker logs nuvio-manager</code>. L’adresse publique servira à générer les URL des addons proxifiés.</p><button class="primary">${publicUrlOnly ? "Enregistrer l’adresse" : "Créer l’administrateur"}</button><p id="setup-error" class="error" hidden></p></form>`,
+  );
+  $("#setup-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.target));
+    if (!publicUrlOnly && values.password !== values.confirmation) {
+      $("#setup-error").hidden = false;
+      $("#setup-error").textContent = "Les deux mots de passe ne correspondent pas.";
+      return;
+    }
+    try {
+      const result = await api("setup", {
+        code: values.code,
+        username: values.username,
+        password: values.password,
+        publicUrl: values.publicUrl,
+      });
+      $("#dialog").close();
+      if (result.requiresLogin) login();
+      else await render();
+    } catch (error) {
+      $("#setup-error").hidden = false;
+      $("#setup-error").textContent = error.message;
+    }
+  };
+}
 $$("#nav button").forEach(
   (b) =>
     (b.onclick = () =>
@@ -1166,10 +1195,11 @@ $$("#nav button").forEach(
 $("#logout").onclick = () =>
   run(async () => {
     await api("logout", {});
-    if (state.local)
-      toast(
-        "Le mode local ne nécessite pas de mot de passe. Définissez MANAGER_PASSWORD pour le protéger.",
-      );
-    else login();
+    login();
   });
-run(render);
+run(async () => {
+  const initial = await api("setup");
+  if (initial.required) setup();
+  else if (initial.publicUrlRequired) setup(true);
+  else await render();
+});

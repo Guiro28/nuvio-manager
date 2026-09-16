@@ -19,6 +19,16 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
     </section>
 
     <section class="panel">
+      <h2>Adresse publique</h2>
+      <p class="muted">Adresse utilisée pour générer les manifests et les liens des addons proxifiés. Indique le domaine HTTPS de ton reverse proxy, sans chemin final.</p>
+      <form id="public-url-form" class="form">
+        <label>URL du dashboard<input name="publicUrl" type="url" value="${esc(config.publicUrl)}" autocomplete="off" spellcheck="false" placeholder="https://manager.example.com" required></label>
+        <div class="actions"><button class="primary">Enregistrer l’adresse</button></div>
+        <p id="public-url-result" class="muted"></p>
+      </form>
+    </section>
+
+    <section class="panel">
       <h2>Proxy externe</h2>
       <p class="muted">Configure une sortie WARP ou tout autre proxy HTTP(S) ou SOCKS accessible depuis le serveur. Cette adresse est utilisée par les addons attribués au mode « Proxy externe ».</p>
       <p>${proxy.configured ? `✓ Proxy ${esc(proxy.type)} configuré : <code>${esc(proxy.display)}</code>${proxy.source === "environment" ? " · variable d’environnement" : ""}` : "Aucun proxy externe configuré."}</p>
@@ -75,6 +85,18 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       toast("Clé TMDB supprimée.");
       await onSaved();
     });
+
+  $("#public-url-form").onsubmit = (event) => {
+    event.preventDefault();
+    run(async () => {
+      const result = await api("settings/public-url", { url: new FormData(event.target).get("publicUrl") });
+      $("#public-url-result").textContent = result.url === location.origin
+        ? "Adresse publique enregistrée."
+        : `Adresse enregistrée. Ouvre maintenant ${result.url}`;
+      toast("Adresse publique enregistrée.");
+      if (result.url === location.origin) await onSaved();
+    });
+  };
 
   const proxyInput = $("#proxy-form [name=externalProxyUrl]");
   $("#proxy-form").onsubmit = (event) => {

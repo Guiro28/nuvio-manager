@@ -129,7 +129,6 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
       PORT: "0",
       HOST: "127.0.0.1",
       DATA_DIR: folder,
-      MANAGER_PASSWORD: "test-password",
       NUVIO_API_URL: `http://127.0.0.1:${mock.address().port}`,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -140,7 +139,7 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
     await new Promise((r) => mock.close(r));
     fs.rmSync(folder, { recursive: true, force: true });
   });
-  const base = await new Promise((resolve, reject) => {
+  const startup = await new Promise((resolve, reject) => {
     let output = "";
     const timer = setTimeout(
       () => reject(Error("Server startup timeout")),
@@ -149,13 +148,15 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
     child.stdout.on("data", (chunk) => {
       output += chunk;
       const m = output.match(/http:\/\/localhost:(\d+)/);
-      if (m) {
+      const code = output.match(/Code de configuration : ([A-F0-9]+)/);
+      if (m && code) {
         clearTimeout(timer);
-        resolve("http://127.0.0.1:" + m[1]);
+        resolve({ base: "http://127.0.0.1:" + m[1], setupCode: code[1] });
       }
     });
     child.once("error", reject);
   });
+  const { base, setupCode } = startup;
   let cookie = "";
   const call = async (route, data, extra = {}) => {
     const res = await fetch(base + "/api/" + route, {
@@ -172,13 +173,19 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
       cookie: res.headers.get("set-cookie"),
     };
   };
-  assert.equal((await call("state")).status, 401);
-  const login = await call("login", {
-    user: "admin",
+  assert.equal((await call("setup")).data.required, true);
+  assert.equal((await call("state")).status, 428);
+  assert.equal((await call("setup", { code: "INVALID", username: "admin", password: "test-password", publicUrl: base })).status, 403);
+  const setup = await call("setup", {
+    code: setupCode,
+    username: "admin",
     password: "test-password",
+    publicUrl: base,
   });
-  assert.equal(login.status, 200);
-  cookie = login.cookie.split(";")[0];
+  assert.equal(setup.status, 200);
+  cookie = setup.cookie.split(";")[0];
+  assert.equal((await call("setup")).data.required, false);
+  assert.equal((await call("setup", { code: setupCode, username: "other", password: "another-password", publicUrl: base })).status, 409);
   assert.equal(
     (await call("pair/start", {}, { Origin: "https://evil.example" })).status,
     403,
@@ -300,6 +307,7 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.equal((await call('settings/proxy',{url:'socks5://proxy-user:proxy-secret@proxy.example:1080'})).status,200);
   const panelSettings = await call('settings');
   assert.equal(panelSettings.data.tmdbConfigured,true);
+  assert.equal(panelSettings.data.publicUrl,base);
   assert.equal(panelSettings.data.externalProxy.configured,true);
   assert.equal(panelSettings.data.externalProxy.type,'SOCKS');
   assert.equal(panelSettings.data.externalProxy.display,'socks5://proxy.example:1080');
@@ -309,6 +317,8 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.equal(JSON.stringify(panelSettings.data).includes('trakt-secret'),false);
   assert.equal(JSON.stringify(panelSettings.data).includes('tmdb-test-secret'),false);
   assert.equal(JSON.stringify(panelSettings.data).includes('proxy-secret'),false);
+  assert.equal((await call('settings/public-url',{url:'ftp://manager.invalid'})).status,400);
+  assert.equal((await call('settings/public-url',{url:base})).status,200);
   assert.equal((await call('settings/admin',{username:'owner',currentPassword:'wrong',newPassword:'new-test-password'})).status,403);
   assert.equal((await call('settings/admin',{username:'owner',currentPassword:'test-password',newPassword:'short'})).status,400);
   const updatedAdmin=await call('settings/admin',{username:'owner',currentPassword:'test-password',newPassword:'new-test-password'});
@@ -330,4 +340,51 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.equal(fs.readFileSync(path.join(folder,'panel-settings.enc')).includes(Buffer.from('trakt-secret')),false);
   assert.equal(fs.readFileSync(path.join(folder,'panel-settings.enc')).includes(Buffer.from('proxy-secret')),false);
 
+});
+
+test("an existing administrator can securely migrate the public URL", async (t) => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "nuvio-public-url-migration-"));
+  const { vault } = await import("../server/core.js");
+  const { hashPassword } = await import("../server/panel-auth.js");
+  vault(folder).write("panel-settings", {
+    admin: { ...hashPassword("existing-password"), username: "existing-admin" },
+  });
+  const child = spawn(process.execPath, ["server/index.js"], {
+    cwd: process.cwd(),
+    env: { ...process.env, PORT: "0", HOST: "127.0.0.1", DATA_DIR: folder },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    child.kill();
+    await once(child, "exit");
+    fs.rmSync(folder, { recursive: true, force: true });
+  });
+  const startup = await new Promise((resolve, reject) => {
+    let output = "";
+    const timer = setTimeout(() => reject(Error("Server startup timeout")), 10000);
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      const portMatch = output.match(/http:\/\/localhost:(\d+)/);
+      const codeMatch = output.match(/Code de configuration : ([A-F0-9]+)/);
+      if (portMatch && codeMatch) {
+        clearTimeout(timer);
+        resolve({ base: `http://127.0.0.1:${portMatch[1]}`, code: codeMatch[1] });
+      }
+    });
+    child.once("error", reject);
+  });
+  const request = async (route, data) => {
+    const response = await fetch(`${startup.base}/api/${route}`, {
+      ...(data ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) } : {}),
+    });
+    return { status: response.status, data: await response.json(), cookie: response.headers.get("set-cookie") };
+  };
+  const before = await request("setup");
+  assert.equal(before.data.required, false);
+  assert.equal(before.data.publicUrlRequired, true);
+  assert.equal((await request("setup", { code: startup.code, publicUrl: startup.base })).data.requiresLogin, true);
+  const after = await request("setup");
+  assert.equal(after.data.publicUrlRequired, false);
+  assert.equal((await request("login", { user: "existing-admin", password: "existing-password" })).status, 200);
+  assert.equal(vault(folder).read("panel-settings").publicUrl, startup.base);
 });

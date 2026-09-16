@@ -79,10 +79,11 @@ const passthroughHeaders = [
   "etag",
 ];
 
-export function createIntegratedProxy({ state, save, origin, warpUrl, getProxyUrl }) {
+export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl, getProxyUrl }) {
+  const configuredOrigin = () => getOrigin ? getOrigin() : origin;
   const configuredProxy = () => getProxyUrl
     ? getProxyUrl()
-    : warpUrl || process.env.WARP_PROXY_URL || "";
+    : warpUrl || "";
   if (!Array.isArray(state.proxyAddons)) {
     state.proxyAddons = [];
     save();
@@ -225,7 +226,7 @@ export function createIntegratedProxy({ state, save, origin, warpUrl, getProxyUr
         addon,
         restPath,
         url.search,
-        `${origin}/relay/${mode}`,
+        `${configuredOrigin()}/relay/${mode}`,
         upstream,
       );
       res.writeHead(output.status, { "Content-Type": output.contentType });

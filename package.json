@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --watch-path=server server/index.js",
-    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --watch-path=server server/index.js",
+    "start": "node server/index.js",
     "test": "node --test tests/*.test.js"
   },
   "engines": {

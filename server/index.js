@@ -32,8 +32,6 @@ import { call, rpc, profile, profileList, backend } from "./nuvio.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const host = process.env.HOST || "127.0.0.1",
   port = Number(process.env.PORT || 3100);
-const user = process.env.MANAGER_USER || "admin",
-  password = process.env.MANAGER_PASSWORD;
 
 const db = vault(process.env.DATA_DIR || path.join(root, "data"));
 const state = db.read("state", { accounts: [], library: [], backups: [] });
@@ -50,25 +48,36 @@ const sessions = new Map(
 );
 const tmdbCache = db.read("tmdb-cache", { version: 1, entries: {}, genres: {} });
 const trackerCache = db.read("tracker-cache", { entries: {} });
-const authEnabled = () => Boolean(panel.admin || password);
-const adminName = () => panel.admin?.username || user;
-const validPassword = value => panel.admin ? verifyPassword(value, panel.admin) : typeof value === "string" && Boolean(password) && equal(value, password);
-assert(authEnabled() || host === "127.0.0.1", "MANAGER_PASSWORD est obligatoire hors de localhost");
+const authEnabled = () => Boolean(panel.admin);
+const setupRequired = () => !panel.admin;
+const setupCode = setupRequired() || !panel.publicUrl ? crypto.randomBytes(8).toString("hex").toUpperCase() : "";
+const adminName = () => panel.admin?.username || "";
+const validPassword = value => verifyPassword(value, panel.admin);
 const pairings = new Map(),
   plans = new Map(),
   locks = new Set(),
   refreshing = new Map();
 const statisticsCache = new Map();
 const trackerPairings = new Map();
-const origin =
-  process.env.PUBLIC_URL?.replace(/\/$/, "") || `http://localhost:${port}`;
+function normalizePublicUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value || "").trim());
+  } catch {
+    throw Object.assign(new Error("Adresse publique invalide"), { status: 400 });
+  }
+  assert(["http:", "https:"].includes(url.protocol) && url.hostname, "Adresse publique HTTP/HTTPS requise");
+  assert(!url.username && !url.password && url.pathname === "/" && !url.search && !url.hash, "L’adresse publique ne doit contenir ni identifiants, ni chemin, ni paramètres");
+  return url.origin;
+}
+const publicOrigin = () => panel.publicUrl || `http://localhost:${port}`;
 const effectiveProxyUrl = () => panel.proxyUrl !== undefined
   ? panel.proxyUrl
-  : process.env.WARP_PROXY_URL || "";
+  : "";
 const addonProxy = createIntegratedProxy({
   state,
   save,
-  origin,
+  getOrigin: publicOrigin,
   getProxyUrl: effectiveProxyUrl,
 });
 const saveSessions = () =>
@@ -82,7 +91,7 @@ const issueSession = (res) => {
   saveSessions();
   res.setHeader(
     "Set-Cookie",
-    `nm_session=${sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${origin.startsWith("https:") ? "; Secure" : ""}`,
+    `nm_session=${sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${publicOrigin().startsWith("https:") ? "; Secure" : ""}`,
   );
   return sid;
 };
@@ -247,7 +256,7 @@ async function installation(item, mode) {
   if (mode === "none") return item.url;
   assert(["direct", "warp"].includes(mode), "Mode proxy invalide");
   const addon = await addonProxy.register(item, mode);
-  return `${origin}/relay/${mode}/${addon.id}/manifest.json`;
+  return `${publicOrigin()}/relay/${mode}/${addon.id}/manifest.json`;
 }
 const writableList = (rows) =>
   rows.map((r, i) => ({
@@ -309,10 +318,14 @@ const server = http.createServer(async (req, res) => {
           415,
         );
         const allowed = new Set([
-          origin,
+          publicOrigin(),
           `http://localhost:${port}`,
           `http://127.0.0.1:${port}`,
         ]);
+        if (url.pathname === "/api/setup" && req.headers.host) {
+          allowed.add(`http://${req.headers.host}`);
+          allowed.add(`https://${req.headers.host}`);
+        }
         assert(
           !req.headers.origin || allowed.has(req.headers.origin),
           "Origine non autorisée",
@@ -325,12 +338,35 @@ const server = http.createServer(async (req, res) => {
         );
       }
       const allowedHosts = new Set([
-        new URL(origin).host,
+        new URL(publicOrigin()).host,
         `localhost:${port}`,
         `127.0.0.1:${port}`,
       ]);
-      if (port !== 0)
+      if (port !== 0 && url.pathname !== "/api/setup")
         assert(allowedHosts.has(req.headers.host), "Hôte non autorisé", 403);
+      if (url.pathname === "/api/setup") {
+        if (req.method === "GET") return json(res, { required: setupRequired(), publicUrlRequired: !panel.publicUrl });
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(setupRequired() || !panel.publicUrl, "La configuration initiale est déjà terminée", 409);
+        const b = await body(req),
+          ip = req.socket.remoteAddress,
+          recent = attempts.get(ip) || [],
+          active = recent.filter((time) => Date.now() - time < 60000);
+        assert(active.length < 10, "Réessaie dans une minute", 429);
+        active.push(Date.now());
+        attempts.set(ip, active);
+        assert(typeof b.code === "string" && equal(b.code.trim().toUpperCase(), setupCode), "Code de configuration incorrect", 403);
+        const createAdmin = setupRequired();
+        if (createAdmin) {
+          assert(typeof b.username === "string" && b.username.trim().length > 0 && b.username.trim().length <= 80, "Nom d’utilisateur requis (80 caractères maximum)");
+          assert(typeof b.password === "string" && b.password.length >= 12 && b.password.length <= 1024, "Le mot de passe doit contenir au moins 12 caractères");
+          panel.admin = { ...hashPassword(b.password), username: b.username.trim() };
+        }
+        panel.publicUrl = normalizePublicUrl(b.publicUrl);
+        savePanel();
+        if (createAdmin) issueSession(res);
+        return json(res, { ok: true, requiresLogin: !createAdmin });
+      }
       if (url.pathname === "/api/login") {
         const b = await body(req),
           ip = req.socket.remoteAddress,
@@ -355,11 +391,8 @@ const server = http.createServer(async (req, res) => {
         sessions.delete(sid);
         saveSessions();
       }
-      assert(
-        !authEnabled() || sessionExpiry > Date.now(),
-        "Connexion au dashboard requise",
-        401,
-      );
+      assert(!setupRequired(), "Configuration initiale requise", 428);
+      assert(authEnabled() && sessionExpiry > Date.now(), "Connexion au dashboard requise", 401);
       const b = req.method === "GET"
         ? {}
         : await body(req, url.pathname === "/api/backup/restore-file" ? 25_000_000 : 2_000_000);
@@ -386,6 +419,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, {
           username: adminName(),
           authEnabled: authEnabled(),
+          publicUrl: publicOrigin(),
           tmdbConfigured: Boolean(panel.tmdbKey),
           externalProxy,
           trackers: {
@@ -414,6 +448,13 @@ const server = http.createServer(async (req, res) => {
         savePanel();
         return json(res, { ok: true, ...proxySummary(panel.proxyUrl) });
       }
+      if (route === "/api/settings/public-url") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(typeof b.url === "string", "Adresse publique requise");
+        panel.publicUrl = normalizePublicUrl(b.url);
+        savePanel();
+        return json(res, { ok: true, url: panel.publicUrl });
+      }
       if (route === "/api/settings/proxy/test") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
         const candidate = typeof b.url === "string" && b.url.trim()
@@ -427,11 +468,11 @@ const server = http.createServer(async (req, res) => {
         const ip = req.socket.remoteAddress, active = (attempts.get(ip) || []).filter(t=>Date.now()-t<60000);
         assert(active.length < 10, "Réessaie dans une minute", 429);
         active.push(Date.now()); attempts.set(ip,active);
-        assert(!authEnabled() || validPassword(b.currentPassword), "Mot de passe actuel incorrect", 403);
+        assert(validPassword(b.currentPassword), "Mot de passe actuel incorrect", 403);
         assert(typeof b.username === "string" && b.username.trim().length > 0 && b.username.trim().length <= 80, "Nom d’utilisateur requis (80 caractères maximum)");
         assert(typeof b.newPassword === "string" && b.newPassword.length <= 1024, "Mot de passe invalide");
-        assert((authEnabled() && b.newPassword === "") || b.newPassword.length >= 12, "Le nouveau mot de passe doit contenir au moins 12 caractères");
-        const record = b.newPassword ? hashPassword(b.newPassword) : panel.admin || hashPassword(password);
+        assert(b.newPassword === "" || b.newPassword.length >= 12, "Le nouveau mot de passe doit contenir au moins 12 caractères");
+        const record = b.newPassword ? hashPassword(b.newPassword) : panel.admin;
         const next = {...panel,admin:{salt:record.salt,hash:record.hash,username:b.username.trim()}};
         db.write("panel-settings",next); Object.assign(panel,next);
         sessions.clear();
@@ -461,7 +502,6 @@ const server = http.createServer(async (req, res) => {
           library: state.library,
           backups: state.backups,
           backend,
-          local: !authEnabled(),
         });
       if (route === "/api/logout") {
         sessions.delete(sid);
@@ -1066,6 +1106,13 @@ const server = http.createServer(async (req, res) => {
     else res.destroy();
   }
 });
-server.listen(port, host, () =>
-  console.log(`Nuvio Manager : http://localhost:${server.address().port}`),
-);
+server.listen(port, host, () => {
+  console.log(`Nuvio Manager : http://localhost:${server.address().port}`);
+  if (setupRequired()) {
+    console.log("Configuration initiale requise.");
+    console.log(`Code de configuration : ${setupCode}`);
+  } else if (!panel.publicUrl) {
+    console.log("Adresse publique à configurer.");
+    console.log(`Code de configuration : ${setupCode}`);
+  }
+});
