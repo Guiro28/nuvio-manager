@@ -30,7 +30,7 @@ Le jeton GitHub utilisé sur le VPS doit disposer du droit `read:packages`. Pour
 docker run -d \
   --name nuvio-manager \
   --restart unless-stopped \
-  -p 127.0.0.1:3100:3100 \
+  -p 3100:3100 \
   -v nuvio-manager-data:/app/data \
   ghcr.io/guiro28/nuvio-manager:latest
 ```
@@ -47,7 +47,7 @@ docker compose up -d
 docker logs nuvio-manager
 ```
 
-Ouvrir ensuite le domaine du dashboard. L’assistant demande le code affiché dans les journaux, le nom d’utilisateur, le mot de passe administrateur et l’adresse publique. Placer un reverse proxy HTTPS devant `127.0.0.1:3100`. Exemple Caddy :
+Ouvrir ensuite le domaine ou le port `3100` du serveur. L’assistant demande le code affiché dans les journaux, le nom d’utilisateur, le mot de passe administrateur et l’adresse publique. Pour utiliser HTTPS, placer un reverse proxy devant le port `3100`. Exemple Caddy :
 
 ```caddy
 manager.example.com {
