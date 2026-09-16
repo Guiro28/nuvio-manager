@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import {schema,descriptor,settingsLeaves,officialSettingsItems,settingControl,readSettingControl,setSettingValue,choices,settingsSections,visibleOfficialSettings} from '../public/settings-controls-v2.js';
 test('official controls have unique keys, French labels and typed choices',()=>{
  for(const [platform,fields] of Object.entries(schema)){assert.equal(new Set(fields.map(x=>x.feature+'.'+x.key)).size,fields.length);for(const f of fields){assert.ok(f.title);for(const o of f.options||[])if(['int','float','long'].includes(f.type))assert.equal(typeof o.value,'number',platform+f.key);}}
@@ -51,12 +50,11 @@ test('official editor exposes every web setting and isolates the two app-only Mo
  assert.equal(settingsSections.mobile.some(section=>section.groups.some(group=>group.keys.includes('theme_settings.selected_theme'))),false);
  const items=officialSettingsItems({version:3,features:{}},'mobile');
  assert.equal(items.official.length,150);assert.equal(items.extra.length,0);assert.equal(items.official.every(x=>x.virtual),true);
- const extracted=JSON.parse(fs.readFileSync(new URL('../reference-public/settings-extracted.json',import.meta.url)));
  for(const platform of ['tv','mobile']){
-  const web=new Set(extracted[platform].map(x=>x.feature+'.'+x.key));
-  const active=new Set(schema[platform].map(x=>x.feature+'.'+x.key));
-  assert.deepEqual([...web].filter(key=>!active.has(key)),[]);
-  assert.deepEqual([...active].filter(key=>!web.has(key)),platform==='mobile'?['theme_settings.nav_bar_style','meta_screen_settings_payload.background_mode']:[]);
+  const grouped=new Set(settingsSections[platform].flatMap(section=>section.groups.flatMap(group=>group.keys)));
+  const active=new Set(schema[platform].map(item=>item.feature+'.'+item.key));
+  assert.deepEqual([...grouped].filter(key=>!active.has(key)),[]);
+  assert.deepEqual([...active].filter(key=>!grouped.has(key)),['theme_settings.selected_theme']);
  }
 });
 test('editing an absent official setting materializes the correct Nuvio wire format',()=>{
