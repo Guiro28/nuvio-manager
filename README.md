@@ -57,28 +57,32 @@ manager.example.com {
 
 Les routes `/relay/direct/*` et `/relay/warp/*` doivent rester accessibles aux lecteurs. Les routes de gestion exigent le mot de passe du dashboard. Ne pas ajouter d’authentification HTTP globale devant les routes de lecture. Le proxy ne relaie que les flux directs HTTP/HTTPS, conformément au projet d’origine.
 
-### Utiliser un conteneur WARP existant
+### Utiliser un proxy ou un conteneur WARP existant
 
-Le dashboard attend un proxy SOCKS5. La méthode recommandée consiste à raccorder le conteneur WARP existant au réseau créé par Nuvio Manager :
+Ouvrir **Paramètres > Proxy externe** dans le dashboard pour enregistrer et tester une URL `http://`, `https://`, `socks://`, `socks4://` ou `socks5://`. La valeur est chiffrée dans les données du panel et s’applique immédiatement aux addons attribués au mode **Proxy externe**. Elle peut contenir les identifiants du proxy, par exemple `socks5://utilisateur:mot-de-passe@serveur:1080`.
+
+Pour un proxy hébergé ailleurs, saisir simplement son URL publique ou privée accessible depuis le serveur. Pour un conteneur WARP présent sur le même serveur, la méthode recommandée consiste à le raccorder au réseau créé par Nuvio Manager :
 
 ```sh
 docker compose up -d manager
 docker network connect --alias warp-existant nuvio-manager_default votre-conteneur-warp
 ```
 
-Définir son alias et son port SOCKS5 dans `.env` :
+Saisir ensuite cette URL dans le dashboard :
 
-```env
-WARP_PROXY_URL=socks5://warp-existant:1080
+```text
+socks5://warp-existant:1080
 ```
 
 Si le SOCKS5 de WARP est déjà publié sur un port de l’hôte accessible aux conteneurs, utiliser plutôt :
 
-```env
-WARP_PROXY_URL=socks5://host.docker.internal:40000
+```text
+socks5://host.docker.internal:40000
 ```
 
-L’entrée `host.docker.internal` est configurée par `compose.yaml`, y compris sous Docker Engine Linux. Un port publié uniquement sur `127.0.0.1` de l’hôte n’est généralement pas joignable depuis un conteneur ; le réseau Docker partagé évite d’exposer ce port. Ne pas activer le profil `warp` lorsque le conteneur existant est utilisé. Redémarrer ensuite le dashboard avec `docker compose up -d --force-recreate manager`, puis contrôler l’état depuis **Proxy & WARP**.
+L’entrée `host.docker.internal` est configurée par `compose.yaml`, y compris sous Docker Engine Linux. Un port publié uniquement sur `127.0.0.1` de l’hôte n’est généralement pas joignable depuis un conteneur ; le réseau Docker partagé évite d’exposer ce port. Ne pas activer le profil `warp` lorsque le conteneur existant est utilisé. Contrôler ensuite la connexion et l’IP de sortie depuis **Proxy**.
+
+`WARP_PROXY_URL` reste disponible comme valeur initiale ou solution de secours définie par l’environnement. Dès qu’une adresse est enregistrée ou désactivée depuis le dashboard, le réglage chiffré du panel prend la priorité.
 
 En développement, le proxy direct fonctionne dans `npm run dev`. Pour tester WARP, lancer `docker compose --profile warp up -d warp` ; sa sortie SOCKS5 est exposée sur `127.0.0.1:40000`. WARP nécessite Docker/Linux et `/dev/net/tun`.
 

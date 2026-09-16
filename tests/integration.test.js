@@ -296,13 +296,19 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.equal((await call('settings')).data.username, 'admin');
   assert.equal((await call('settings/tmdb',{key:'tmdb-test-secret'})).status,200);
   assert.equal((await call('settings/trackers',{traktClientId:'trakt-client',traktClientSecret:'trakt-secret',simklClientId:'simkl-client'})).status,200);
+  assert.equal((await call('settings/proxy',{url:'ftp://proxy.invalid:21'})).status,400);
+  assert.equal((await call('settings/proxy',{url:'socks5://proxy-user:proxy-secret@proxy.example:1080'})).status,200);
   const panelSettings = await call('settings');
   assert.equal(panelSettings.data.tmdbConfigured,true);
+  assert.equal(panelSettings.data.externalProxy.configured,true);
+  assert.equal(panelSettings.data.externalProxy.type,'SOCKS');
+  assert.equal(panelSettings.data.externalProxy.display,'socks5://proxy.example:1080');
   assert.equal(panelSettings.data.trackers.trakt.configured,true);
   assert.equal(panelSettings.data.trackers.trakt.clientId,'trakt-client');
   assert.equal(panelSettings.data.trackers.simkl.clientId,'simkl-client');
   assert.equal(JSON.stringify(panelSettings.data).includes('trakt-secret'),false);
   assert.equal(JSON.stringify(panelSettings.data).includes('tmdb-test-secret'),false);
+  assert.equal(JSON.stringify(panelSettings.data).includes('proxy-secret'),false);
   assert.equal((await call('settings/admin',{username:'owner',currentPassword:'wrong',newPassword:'new-test-password'})).status,403);
   assert.equal((await call('settings/admin',{username:'owner',currentPassword:'test-password',newPassword:'short'})).status,400);
   const updatedAdmin=await call('settings/admin',{username:'owner',currentPassword:'test-password',newPassword:'new-test-password'});
@@ -316,10 +322,12 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   const {verifyPassword}=await import('../server/panel-auth.js');
   const stored=vault(folder).read('panel-settings');
   assert.equal(stored.tmdbKey,'tmdb-test-secret');
+  assert.equal(stored.proxyUrl,'socks5://proxy-user:proxy-secret@proxy.example:1080');
   assert.equal(stored.trackerApps.trakt.clientSecret,'trakt-secret');
   assert.equal(verifyPassword('new-test-password',stored.admin),true);
   assert.equal(JSON.stringify(stored).includes('new-test-password'),false);
   assert.equal(fs.readFileSync(path.join(folder,'panel-settings.enc')).includes(Buffer.from('tmdb-test-secret')),false);
   assert.equal(fs.readFileSync(path.join(folder,'panel-settings.enc')).includes(Buffer.from('trakt-secret')),false);
+  assert.equal(fs.readFileSync(path.join(folder,'panel-settings.enc')).includes(Buffer.from('proxy-secret')),false);
 
 });

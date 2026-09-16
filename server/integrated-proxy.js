@@ -11,9 +11,46 @@ const { request, readAll } = require("../vendor/proxy/src/http.js");
 const { decodeToken, fetchManifest, fetchResource } = require("../vendor/proxy/src/addon.js");
 
 const MODES = new Set(["direct", "warp"]);
-const upstreamFor = (mode, warpUrl) => mode === "warp"
-  ? { mode: "socks", url: warpUrl }
-  : { mode: "direct", url: "" };
+const PROXY_PROTOCOLS = new Set(["http:", "https:", "socks:", "socks4:", "socks4a:", "socks5:", "socks5h:"]);
+
+export function normalizeProxyUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.length > 4096) throw Object.assign(new Error("URL du proxy trop longue"), { status: 400 });
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw Object.assign(new Error("URL du proxy invalide"), { status: 400 });
+  }
+  if (!PROXY_PROTOCOLS.has(url.protocol) || !url.hostname)
+    throw Object.assign(new Error("Utilise une URL HTTP(S) ou SOCKS valide"), { status: 400 });
+  if ((url.pathname && url.pathname !== "/") || url.search || url.hash)
+    throw Object.assign(new Error("L’URL du proxy ne doit pas contenir de chemin, de paramètres ou d’ancre"), { status: 400 });
+  return url.toString();
+}
+
+export function proxySummary(value) {
+  const normalized = normalizeProxyUrl(value);
+  if (!normalized) return { configured: false, display: "", type: "" };
+  const url = new URL(normalized);
+  const type = url.protocol.startsWith("http") ? "HTTP" : "SOCKS";
+  return {
+    configured: true,
+    display: `${url.protocol}//${url.hostname}${url.port ? `:${url.port}` : ""}`,
+    type,
+  };
+}
+
+const upstreamFor = (mode, proxyUrl) => {
+  if (mode !== "warp") return { mode: "direct", url: "" };
+  const normalized = normalizeProxyUrl(proxyUrl);
+  if (!normalized) throw Object.assign(new Error("Aucun proxy externe n’est configuré"), { status: 400 });
+  return {
+    mode: normalized.startsWith("http:") || normalized.startsWith("https:") ? "http" : "socks",
+    url: normalized,
+  };
+};
 
 function normalizeManifestUrl(value) {
   let source = String(value || "").trim().replace(/^stremio:\/\//i, "https://");
@@ -42,8 +79,10 @@ const passthroughHeaders = [
   "etag",
 ];
 
-export function createIntegratedProxy({ state, save, origin, warpUrl }) {
-  const socksUrl = warpUrl || process.env.WARP_PROXY_URL || "socks5://127.0.0.1:40000";
+export function createIntegratedProxy({ state, save, origin, warpUrl, getProxyUrl }) {
+  const configuredProxy = () => getProxyUrl
+    ? getProxyUrl()
+    : warpUrl || process.env.WARP_PROXY_URL || "";
   if (!Array.isArray(state.proxyAddons)) {
     state.proxyAddons = [];
     save();
@@ -58,7 +97,7 @@ export function createIntegratedProxy({ state, save, origin, warpUrl }) {
     if (addon) return addon;
 
     const { res } = await request(manifestUrl, {
-      upstream: upstreamFor(mode, socksUrl),
+      upstream: upstreamFor(mode, configuredProxy()),
       headers: { accept: "application/json" },
       timeout: 25000,
     });
@@ -77,38 +116,42 @@ export function createIntegratedProxy({ state, save, origin, warpUrl }) {
     return addon;
   }
 
-  async function checkWarp() {
+  async function checkProxy(proxyUrl = configuredProxy()) {
+    if (!proxyUrl) return { available: false, configured: false, upstream: "non configuré" };
     try {
-      const { res } = await request("https://cloudflare.com/cdn-cgi/trace", {
-        upstream: upstreamFor("warp", socksUrl),
-        timeout: 6000,
-        headers: { accept: "text/plain" },
+      const upstream = upstreamFor("warp", proxyUrl);
+      const { res } = await request("https://api.ipify.org?format=json", {
+        upstream,
+        timeout: 10000,
+        headers: { accept: "application/json" },
       });
-      const trace = (await readAll(res)).toString("utf8");
-      return /^(warp=on|warp=plus)$/m.test(trace);
-    } catch {
-      return false;
+      const data = JSON.parse((await readAll(res)).toString("utf8"));
+      if (!data.ip) throw new Error("Réponse IP invalide");
+      return { available: true, configured: true, upstream: upstream.mode, ip: data.ip };
+    } catch (error) {
+      return { available: false, configured: true, upstream: "proxy", error: error.message };
     }
   }
 
   async function status() {
-    const warpAvailable = await checkWarp();
+    const external = await checkProxy();
     return [
       { mode: "direct", available: true, upstream: "direct" },
-      { mode: "warp", available: warpAvailable, upstream: "socks" },
+      { mode: "warp", ...external },
     ];
   }
 
-  async function test(mode) {
+  async function test(mode, proxyUrl) {
     if (!MODES.has(mode)) throw new Error("Mode proxy invalide");
     try {
+      const upstream = upstreamFor(mode, proxyUrl === undefined ? configuredProxy() : proxyUrl);
       const { res } = await request("https://api.ipify.org?format=json", {
-        upstream: upstreamFor(mode, socksUrl),
+        upstream,
         timeout: 15000,
         headers: { accept: "application/json" },
       });
       const data = JSON.parse((await readAll(res)).toString("utf8"));
-      return { ok: true, ip: data.ip, mode };
+      return { ok: true, ip: data.ip, mode, upstream: upstream.mode };
     } catch (error) {
       return { ok: false, error: error.message, mode };
     }
@@ -133,8 +176,8 @@ export function createIntegratedProxy({ state, save, origin, warpUrl }) {
     }
 
     const mode = match[1];
-    const upstream = upstreamFor(mode, socksUrl);
     try {
+      const upstream = upstreamFor(mode, configuredProxy());
       if (match[2] === "play") {
         const decoded = decodeToken(url.searchParams.get("t"));
         const headers = { ...decoded.headers };

@@ -42,7 +42,7 @@ const labels = {
   statistics: "Statistiques",
   library: "Bibliothèque d’addons",
   copy: "Copier des paramètres",
-  proxy: "Proxy & WARP",
+  proxy: "Proxy",
   backups: "Sauvegardes",
   settings: "Paramètres",
 };
@@ -858,7 +858,7 @@ async function assign(id) {
   if (!accountId) return toast("Connecte d’abord un compte Nuvio.");
   await loadProfiles();
   openDialog(
-    `<h2>Attribuer l’addon</h2><div class="form"><label>Compte<select id="assign-account">${accountOptions()}</select></label><label>Profil<select id="assign-profile">${profileOptions()}</select></label><label>Mode de connexion<select id="assign-mode"><option value="none">Sans proxy · URL d’origine</option><option value="direct">Proxy · IP du serveur</option><option value="warp">Proxy · Cloudflare WARP</option></select></label><p class="muted">Les modes proxy nécessitent les services Docker actifs et une URL publique accessible depuis vos appareils.</p></div><div class="dialog-actions"><button data-close>Annuler</button><button id="assign-preview" class="primary">Prévisualiser l’attribution</button></div>`,
+    `<h2>Attribuer l’addon</h2><div class="form"><label>Compte<select id="assign-account">${accountOptions()}</select></label><label>Profil<select id="assign-profile">${profileOptions()}</select></label><label>Mode de connexion<select id="assign-mode"><option value="none">Sans proxy · URL d’origine</option><option value="direct">Proxy · IP du serveur</option><option value="warp">Proxy externe · WARP, SOCKS ou HTTP</option></select></label><p class="muted">L’adresse du proxy externe se configure dans Paramètres. Les URL publiques du dashboard doivent rester accessibles depuis vos appareils.</p></div><div class="dialog-actions"><button data-close>Annuler</button><button id="assign-preview" class="primary">Prévisualiser l’attribution</button></div>`,
   );
   $("#assign-account").onchange = (e) =>
     run(async () => {
@@ -967,15 +967,15 @@ async function renderCopy() {
 async function renderProxy() {
   $("#content").innerHTML =
     heading(
-      "Proxy & WARP",
+      "Proxy",
       "Le moteur stremio-addon-proxy est intégré au dashboard, avec une sortie choisie pour chaque addon.",
     ) +
-    '<div id="proxy-status" class="status-grid"><p class="muted">Vérification des sorties réseau…</p></div><div class="hint">Sans proxy : le profil utilise l’URL originale. Proxy direct : les flux HTTP/HTTPS passent par l’IP du serveur. Proxy WARP : ils passent par la sortie SOCKS5 WARP. Les flux torrent ne sont pas proxifiés.</div><p class="footer-note">Le proxy direct est toujours disponible dans le dashboard. Le mode WARP devient disponible lorsque le conteneur WARP est démarré.</p>';
+    '<div id="proxy-status" class="status-grid"><p class="muted">Vérification des sorties réseau…</p></div><div class="hint">Sans proxy : le profil utilise l’URL originale. Proxy direct : les flux HTTP/HTTPS passent par l’IP du serveur. Proxy externe : ils passent par l’adresse HTTP(S) ou SOCKS définie dans Paramètres. Les flux torrent ne sont pas proxifiés.</div><p class="footer-note">Le proxy direct est toujours disponible. La sortie externe peut être un conteneur WARP ou tout autre proxy accessible depuis le serveur.</p>';
   const rows = await api("proxy/status");
   $("#proxy-status").innerHTML = rows
     .map(
       (r) =>
-        `<section class="panel"><h2>${r.mode === "direct" ? "Proxy direct" : "Proxy + WARP"}</h2><div class="status-value">${r.available ? "Sortie disponible" : "WARP non démarré / injoignable"}</div><p class="muted">${r.available ? "Routage intégré : " + esc(r.upstream) : "Démarrez le profil Docker WARP."}</p><button data-test="${r.mode}" ${r.available ? "" : "disabled"}>Tester l’IP de sortie</button><p id="ip-${r.mode}" class="muted"></p></section>`,
+        `<section class="panel"><h2>${r.mode === "direct" ? "Proxy direct" : "Proxy externe"}</h2><div class="status-value">${r.available ? "Sortie disponible" : r.configured ? "Proxy injoignable" : "Proxy non configuré"}</div><p class="muted">${r.available ? "Routage intégré : " + esc(r.upstream) : r.configured ? esc(r.error || "Vérifie l’adresse et la connexion du proxy.") : "Ajoute son URL dans Paramètres."}</p><button data-test="${r.mode}" ${r.available ? "" : "disabled"}>Tester l’IP de sortie</button><p id="ip-${r.mode}" class="muted"></p></section>`,
     )
     .join("");
   $$("[data-test]").forEach(

@@ -4,7 +4,7 @@ import { enrichActivity } from "./tmdb.js";
 import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestLogo } from "./manifest.js";
-import { createIntegratedProxy } from "./integrated-proxy.js";
+import { createIntegratedProxy, normalizeProxyUrl, proxySummary } from "./integrated-proxy.js";
 import {
   startTrakt,
   pollTrakt,
@@ -62,11 +62,14 @@ const statisticsCache = new Map();
 const trackerPairings = new Map();
 const origin =
   process.env.PUBLIC_URL?.replace(/\/$/, "") || `http://localhost:${port}`;
+const effectiveProxyUrl = () => panel.proxyUrl !== undefined
+  ? panel.proxyUrl
+  : process.env.WARP_PROXY_URL || "";
 const addonProxy = createIntegratedProxy({
   state,
   save,
   origin,
-  warpUrl: process.env.WARP_PROXY_URL,
+  getProxyUrl: effectiveProxyUrl,
 });
 const saveSessions = () =>
   db.write("sessions", {
@@ -363,10 +366,28 @@ const server = http.createServer(async (req, res) => {
       const route = url.pathname;
       if (route === "/api/settings") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
+        let externalProxy;
+        try {
+          externalProxy = {
+            ...proxySummary(effectiveProxyUrl()),
+            source: panel.proxyUrl !== undefined ? "dashboard" : "environment",
+            valid: true,
+          };
+        } catch (error) {
+          externalProxy = {
+            configured: Boolean(effectiveProxyUrl()),
+            display: "Configuration invalide",
+            type: "",
+            source: panel.proxyUrl !== undefined ? "dashboard" : "environment",
+            valid: false,
+            error: error.message,
+          };
+        }
         return json(res, {
           username: adminName(),
           authEnabled: authEnabled(),
           tmdbConfigured: Boolean(panel.tmdbKey),
+          externalProxy,
           trackers: {
             trakt: {
               configured: Boolean(panel.trackerApps?.trakt?.clientId && panel.trackerApps?.trakt?.clientSecret),
@@ -385,6 +406,21 @@ const server = http.createServer(async (req, res) => {
         const next = {...panel, tmdbKey: b.key.trim()};
         db.write("panel-settings", next); Object.assign(panel,next);
         return json(res, {ok:true});
+      }
+      if (route === "/api/settings/proxy") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(typeof b.url === "string", "URL du proxy requise");
+        panel.proxyUrl = normalizeProxyUrl(b.url);
+        savePanel();
+        return json(res, { ok: true, ...proxySummary(panel.proxyUrl) });
+      }
+      if (route === "/api/settings/proxy/test") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const candidate = typeof b.url === "string" && b.url.trim()
+          ? normalizeProxyUrl(b.url)
+          : effectiveProxyUrl();
+        assert(candidate, "Aucun proxy externe n’est configuré");
+        return json(res, await addonProxy.test("warp", candidate));
       }
       if (route === "/api/settings/admin") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
