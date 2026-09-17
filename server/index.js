@@ -1,7 +1,11 @@
 import { hashPassword, verifyPassword } from "./panel-auth.js";
 import { activity } from "./activity.js";
 import { enrichActivity } from "./tmdb.js";
-import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
+import {
+  collectNuvioNowPlaying,
+  collectNuvioStatistics,
+  summarizeStatistics,
+} from "./statistics.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestLogo } from "./manifest.js";
 import { createIntegratedProxy, normalizeProxyUrl, proxySummary } from "./integrated-proxy.js";
@@ -595,6 +599,53 @@ const server = http.createServer(async (req, res) => {
           cache: tmdbCache,
           persist: (value) => db.write("tmdb-cache", value),
         }));
+      }
+      if (route === "/api/statistics/now-playing") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        const requestedProfiles = new Set(
+          (url.searchParams.get("profiles") || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean),
+        );
+        const collected = await collectNuvioNowPlaying(state.accounts, {
+          getToken: token,
+          rpc,
+          getProfiles: profileList,
+        });
+        const items = requestedProfiles.size
+          ? collected.filter((item) => requestedProfiles.has(item.ref))
+          : collected;
+        const enriched = await enrichActivity(
+          {
+            items: items.map((item) => ({
+              content_id: item.contentId,
+              content_type: item.kind === "movie" ? "movie" : "series",
+            })),
+          },
+          {
+            key: panel.tmdbKey,
+            cache: tmdbCache,
+            persist: (value) => db.write("tmdb-cache", value),
+          },
+        );
+        const metadata = new Map(
+          enriched.items.map((item) => [
+            `${item.content_type}:${item.content_id}`,
+            item.metadata,
+          ]),
+        );
+        return json(res, {
+          generatedAt: Date.now(),
+          items: items.map((item) => ({
+            ...item,
+            metadata:
+              metadata.get(
+                `${item.kind === "movie" ? "movie" : "series"}:${item.contentId}`,
+              ) || null,
+          })),
+          tmdb: enriched.tmdb,
+        });
       }
       if (route === "/api/statistics") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
