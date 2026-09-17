@@ -41,7 +41,7 @@ const labels = {
   profiles: "Comptes & profils",
   statistics: "Statistiques",
   library: "Bibliothèque d’addons",
-  copy: "Copier des paramètres",
+  copy: "Cloner un profil",
   proxy: "Proxy",
   backups: "Sauvegardes",
   settings: "Paramètres",
@@ -880,7 +880,7 @@ async function renderCopy() {
   if (!accountId) {
     $("#content").innerHTML =
       heading(
-        "Copier des paramètres",
+        "Cloner un profil",
         "Transférez tous les réglages synchronisés ou une sélection précise.",
       ) + emptyAccounts();
     $("#connect").onclick = () => run(pair);
@@ -890,7 +890,7 @@ async function renderCopy() {
   selectedPaths = new Set();
   $("#content").innerHTML =
     heading(
-      "Copier des paramètres",
+      "Cloner un profil",
       "Choisissez une source, une destination, puis les éléments à transférer.",
     ) +
     `<div class="two-col"><section class="panel form"><h2>01 · Profil source</h2><label>Compte<select id="source-account">${accountOptions()}</select></label><label>Profil<select id="source-profile">${profileOptions()}</select></label></section><section class="panel form"><h2>02 · Profil destination</h2><label>Compte<select id="target-account">${accountOptions()}</select></label><label>Profil<select id="target-profile">${profileOptions(profiles, profiles.find((p) => p.profile_index !== profileId)?.profile_index)}</select></label></section></div><section class="panel"><h2>03 · Éléments à copier</h2><div class="form"><label class="check-label"><input type="checkbox" id="copy-tv" checked>Tous les paramètres ATV synchronisés</label><label class="check-label"><input type="checkbox" id="copy-mobile" checked>Tous les paramètres Mobile synchronisés</label><label class="check-label"><input type="checkbox" id="copy-addons" checked>Addons, activation et ordre</label><label class="check-label"><input type="checkbox" id="copy-plugins" checked>Plugins, activation et ordre</label><label class="check-label"><input type="checkbox" id="merge">Fusionner les listes d’addons et plugins avec la destination</label></div><hr>${btn("Choisir des paramètres précis", "select-paths")}<div id="path-selector"></div><p class="footer-note">Cette copie concerne les paramètres synchronisés, addons et plugins. Elle conserve l’identité, la bibliothèque et l’historique du profil cible. Les identifiants de fournisseurs stockés séparément ne sont pas copiés.</p></section><div class="actions">${btn("Prévisualiser la copie", "copy-preview", "primary")}</div>`;
