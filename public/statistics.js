@@ -528,5 +528,5 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       return;
     }
     loadNowPlaying().catch(() => {});
-  }, 30_000);
+  }, 10_000);
 }

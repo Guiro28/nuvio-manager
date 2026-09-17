@@ -199,7 +199,7 @@ async function trackerPlayback(ref, service, connection) {
     Object.assign(connection, value.connection);
     savePanel();
   }
-  trackerPlaybackCache.set(key, { expiresAt: Date.now() + 20_000, value });
+  trackerPlaybackCache.set(key, { expiresAt: Date.now() + 8_000, value });
   return value;
 }
 async function refineNowPlaying(items, now = Date.now()) {
