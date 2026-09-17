@@ -1,10 +1,9 @@
 import { assert } from "./core.js";
 
 const DAY = 24 * 60 * 60 * 1000;
-// Nuvio clients keep periodic progress locally while playback is active and only
-// push selected snapshots remotely. Keep the latest incomplete snapshot long
-// enough to cover a long movie instead of expecting a server heartbeat.
-export const NOW_PLAYING_MAX_AGE = 4 * 60 * 60 * 1000;
+// Nuvio exposes progress snapshots rather than an explicit player-closed event.
+// A short inactivity window prevents an abandoned title from lingering.
+export const NOW_PLAYING_MAX_AGE = 5 * 60 * 1000;
 const time = (value) => {
   const number = Number(value);
   if (Number.isFinite(number)) return number;
