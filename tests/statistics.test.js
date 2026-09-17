@@ -89,6 +89,15 @@ test("now playing uses only recent Nuvio progress and keeps one item per profile
         last_watched: now - NOW_PLAYING_MAX_AGE - 1,
       },
     ],
+    3: [
+      {
+        content_id: "tt-long-movie",
+        content_type: "movie",
+        position: 30_000,
+        duration: 10_800_000,
+        last_watched: now - 2 * 60 * 60 * 1000,
+      },
+    ],
   };
   const result = await collectNuvioNowPlaying(
     accounts,
@@ -97,6 +106,7 @@ test("now playing uses only recent Nuvio progress and keeps one item per profile
       getProfiles: async () => [
         { profile_index: 1, name: "Alice", avatar_image_url: "https://example.test/a.png" },
         { profile_index: 2, name: "Bob" },
+        { profile_index: 3, name: "Charlie" },
       ],
       rpc: async (route, params) => {
         calls.push({ route, params });
@@ -105,12 +115,13 @@ test("now playing uses only recent Nuvio progress and keeps one item per profile
     },
     now,
   );
-  assert.equal(result.length, 1);
+  assert.equal(result.length, 2);
   assert.equal(result[0].contentId, "tt-current");
   assert.equal(result[0].profileName, "Alice");
   assert.equal(result[0].kind, "episode");
   assert.equal(result[0].source, "nuvio");
-  assert.equal(calls.length, 2);
+  assert.equal(result[1].contentId, "tt-long-movie");
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].route, "sync_pull_watch_progress");
   assert.equal(calls[0].params.p_since_last_watched, now - NOW_PLAYING_MAX_AGE);
 });
