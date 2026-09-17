@@ -1,12 +1,7 @@
 import { hashPassword, verifyPassword } from "./panel-auth.js";
 import { activity } from "./activity.js";
 import { enrichActivity } from "./tmdb.js";
-import {
-  collectNuvioNowPlaying,
-  collectNuvioStatistics,
-  NOW_PLAYING_MAX_AGE,
-  summarizeStatistics,
-} from "./statistics.js";
+import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestLogo } from "./manifest.js";
 import { createIntegratedProxy, normalizeProxyUrl, proxySummary } from "./integrated-proxy.js";
@@ -16,9 +11,7 @@ import {
   startSimkl,
   pollSimkl,
   traktHistory,
-  traktNowPlaying,
   simklHistory,
-  simklPlayback,
 } from "./trackers.js";
 import http from "node:http";
 import fs from "node:fs";
@@ -66,7 +59,6 @@ const pairings = new Map(),
   refreshing = new Map();
 const statisticsCache = new Map();
 const trackerPairings = new Map();
-const trackerPlaybackCache = new Map();
 function normalizePublicUrl(value) {
   let url;
   try {
@@ -178,54 +170,6 @@ async function externalHistory(accountId, profileId) {
     }
   }
   return output;
-}
-const trackerItemMatches = (nuvio, tracked) => {
-  const contentId = String(nuvio.contentId || "").trim().toLowerCase();
-  const ids = new Set((tracked?.contentIds || []).map((value) => String(value).trim().toLowerCase()));
-  if (!contentId || !ids.has(contentId)) return false;
-  if (nuvio.kind !== "episode") return tracked?.kind === "movie";
-  if (tracked?.kind !== "episode") return false;
-  return (tracked.season == null || Number(tracked.season) === Number(nuvio.season)) &&
-    (tracked.episode == null || Number(tracked.episode) === Number(nuvio.episode));
-};
-async function trackerPlayback(ref, service, connection) {
-  const key = `${ref}:${service}`,
-    cached = trackerPlaybackCache.get(key);
-  if (cached?.expiresAt > Date.now()) return cached.value;
-  const value = service === "trakt"
-    ? await traktNowPlaying(connection, trackerConfig(service))
-    : await simklPlayback(connection, trackerConfig(service));
-  if (value?.connection && value.connection !== connection) {
-    Object.assign(connection, value.connection);
-    savePanel();
-  }
-  trackerPlaybackCache.set(key, { expiresAt: Date.now() + 8_000, value });
-  return value;
-}
-async function refineNowPlaying(items, now = Date.now()) {
-  const decisions = await Promise.all(items.map(async (item) => {
-    const connections = panel.connections?.[item.ref] || {},
-      fallback = item.at >= now - NOW_PLAYING_MAX_AGE,
-      states = [];
-    if (connections.trakt) {
-      try {
-        const status = await trackerPlayback(item.ref, "trakt", connections.trakt);
-        states.push(status.state === "playing" && trackerItemMatches(item, status.item) ? "playing" : "inactive");
-      } catch {}
-    }
-    if (connections.simkl) {
-      try {
-        const sessions = await trackerPlayback(item.ref, "simkl", connections.simkl),
-          match = sessions.find((session) => trackerItemMatches(item, session));
-        if (match) states.push(match.state);
-        else if (!connections.trakt) states.push("playing");
-      } catch {}
-    }
-    if (states.includes("playing")) return item;
-    if (states.includes("paused") || states.includes("inactive")) return null;
-    return fallback ? item : null;
-  }));
-  return decisions.filter(Boolean);
 }
 async function token(a) {
   if (a.expires > Date.now() + 60000) return a.access;
@@ -547,7 +491,6 @@ const server = http.createServer(async (req, res) => {
           simkl: { clientId: b.simklClientId.trim() },
         };
         trackerCache.entries = {};
-        trackerPlaybackCache.clear();
         db.write("tracker-cache", trackerCache);
         statisticsCache.clear();
         savePanel();
@@ -627,8 +570,6 @@ const server = http.createServer(async (req, res) => {
           if (ref.startsWith(prefix)) delete panel.connections[ref];
         for (const ref of Object.keys(trackerCache.entries || {}))
           if (ref.startsWith(prefix)) delete trackerCache.entries[ref];
-        for (const ref of trackerPlaybackCache.keys())
-          if (ref.startsWith(prefix)) trackerPlaybackCache.delete(ref);
         save();
         savePanel();
         db.write("tracker-cache", trackerCache);
@@ -654,54 +595,6 @@ const server = http.createServer(async (req, res) => {
           cache: tmdbCache,
           persist: (value) => db.write("tmdb-cache", value),
         }));
-      }
-      if (route === "/api/statistics/now-playing") {
-        assert(req.method === "GET", "Méthode non autorisée", 405);
-        const requestedProfiles = new Set(
-          (url.searchParams.get("profiles") || "")
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean),
-        );
-        const collected = await collectNuvioNowPlaying(state.accounts, {
-          getToken: token,
-          rpc,
-          getProfiles: profileList,
-        });
-        const refined = await refineNowPlaying(collected);
-        const items = requestedProfiles.size
-          ? refined.filter((item) => requestedProfiles.has(item.ref))
-          : refined;
-        const enriched = await enrichActivity(
-          {
-            items: items.map((item) => ({
-              content_id: item.contentId,
-              content_type: item.kind === "movie" ? "movie" : "series",
-            })),
-          },
-          {
-            key: panel.tmdbKey,
-            cache: tmdbCache,
-            persist: (value) => db.write("tmdb-cache", value),
-          },
-        );
-        const metadata = new Map(
-          enriched.items.map((item) => [
-            `${item.content_type}:${item.content_id}`,
-            item.metadata,
-          ]),
-        );
-        return json(res, {
-          generatedAt: Date.now(),
-          items: items.map((item) => ({
-            ...item,
-            metadata:
-              metadata.get(
-                `${item.kind === "movie" ? "movie" : "series"}:${item.contentId}`,
-              ) || null,
-          })),
-          tmdb: enriched.tmdb,
-        });
       }
       if (route === "/api/statistics") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
@@ -853,7 +746,6 @@ const server = http.createServer(async (req, res) => {
         const ref = connectionRef(b.accountId, Number(b.profileId));
         if (panel.connections?.[ref]) delete panel.connections[ref][b.service];
         delete trackerCache.entries?.[`${ref}:${b.service}`];
-        trackerPlaybackCache.delete(`${ref}:${b.service}`);
         savePanel();
         db.write("tracker-cache", trackerCache);
         statisticsCache.clear();

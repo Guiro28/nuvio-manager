@@ -1,10 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  collectNuvioNowPlaying,
-  NOW_PLAYING_LOOKBACK,
-  summarizeStatistics,
-} from "../server/statistics.js";
+import { summarizeStatistics } from "../server/statistics.js";
 
 test("statistics compare profiles, sources, activity and shared titles", () => {
   const now = Date.UTC(2026, 8, 14, 12);
@@ -55,62 +51,4 @@ test("statistics period excludes older events and rejects arbitrary ranges", () 
   assert.equal(summarizeStatistics([profile], 30, now).totals.plays, 0);
   assert.equal(summarizeStatistics([profile], 0, now).totals.plays, 1);
   assert.throws(() => summarizeStatistics([], 7, now), /Période invalide/);
-});
-
-test("now playing uses only recent Nuvio progress and keeps one item per profile", async () => {
-  const now = Date.UTC(2026, 8, 17, 12);
-  const calls = [];
-  const accounts = [{ id: "home", name: "Maison", email: "home@example.test" }];
-  const rows = {
-    1: [
-      {
-        content_id: "tt-current",
-        content_type: "series",
-        season: 2,
-        episode: 4,
-        position: 1_800_000,
-        duration: 2_700_000,
-        last_watched: now - 30_000,
-      },
-      {
-        content_id: "tt-previous",
-        content_type: "movie",
-        position: 600_000,
-        duration: 7_200_000,
-        last_watched: now - 60_000,
-      },
-    ],
-    2: [
-      {
-        content_id: "tt-old",
-        content_type: "movie",
-        position: 600_000,
-        duration: 7_200_000,
-        last_watched: now - NOW_PLAYING_LOOKBACK - 1,
-      },
-    ],
-  };
-  const result = await collectNuvioNowPlaying(
-    accounts,
-    {
-      getToken: async () => "token",
-      getProfiles: async () => [
-        { profile_index: 1, name: "Alice", avatar_image_url: "https://example.test/a.png" },
-        { profile_index: 2, name: "Bob" },
-      ],
-      rpc: async (route, params) => {
-        calls.push({ route, params });
-        return rows[params.p_profile_id];
-      },
-    },
-    now,
-  );
-  assert.equal(result.length, 1);
-  assert.equal(result[0].contentId, "tt-current");
-  assert.equal(result[0].profileName, "Alice");
-  assert.equal(result[0].kind, "episode");
-  assert.equal(result[0].source, "nuvio");
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].route, "sync_pull_watch_progress");
-  assert.equal(calls[0].params.p_since_last_watched, now - NOW_PLAYING_LOOKBACK);
 });

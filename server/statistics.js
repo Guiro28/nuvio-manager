@@ -1,10 +1,6 @@
 import { assert } from "./core.js";
 
 const DAY = 24 * 60 * 60 * 1000;
-// Nuvio exposes progress snapshots rather than an explicit player-closed event.
-// A short inactivity window prevents an abandoned title from lingering.
-export const NOW_PLAYING_MAX_AGE = 5 * 60 * 1000;
-export const NOW_PLAYING_LOOKBACK = 4 * 60 * 60 * 1000;
 const time = (value) => {
   const number = Number(value);
   if (Number.isFinite(number)) return number;
@@ -234,66 +230,4 @@ export async function collectNuvioStatistics(accounts, { getToken, rpc, external
     }
   }
   return profiles;
-}
-
-export async function collectNuvioNowPlaying(
-  accounts,
-  { getToken, rpc, getProfiles },
-  now = Date.now(),
-) {
-  const cutoff = now - NOW_PLAYING_LOOKBACK;
-  const items = [];
-  for (const account of accounts) {
-    const access = await getToken(account);
-    const identities = getProfiles
-      ? await getProfiles(access)
-      : await rpc("sync_pull_profiles", {}, access);
-    const accountItems = await Promise.all(
-      identities.map(async (identity) => {
-        const profileId = identity.profile_index;
-        const rows = await rpc(
-          "sync_pull_watch_progress",
-          {
-            p_profile_id: profileId,
-            p_since_last_watched: cutoff,
-            p_limit: 25,
-          },
-          access,
-        );
-        const latest = rows
-          .map((row) => ({
-            row,
-            at: time(row.last_watched),
-            position: Number(row.position || 0),
-            duration: Number(row.duration || 0),
-          }))
-          .filter(
-            (item) =>
-              item.at >= cutoff &&
-              item.position > 0 &&
-              item.duration > 0 &&
-              item.position < item.duration,
-          )
-          .sort((left, right) => right.at - left.at)[0];
-        if (!latest) return null;
-        return {
-          source: "nuvio",
-          ref: `${account.id}:${profileId}`,
-          accountName: account.name || account.email,
-          profileName: identity.name || `Profil ${profileId}`,
-          avatarUrl: identity.avatar_image_url || identity.avatar_url || null,
-          contentId: String(latest.row.content_id),
-          title: String(latest.row.title || ""),
-          kind: latest.row.episode == null ? "movie" : "episode",
-          season: latest.row.season,
-          episode: latest.row.episode,
-          position: latest.position,
-          duration: latest.duration,
-          at: latest.at,
-        };
-      }),
-    );
-    items.push(...accountItems.filter(Boolean));
-  }
-  return items.sort((left, right) => right.at - left.at);
 }

@@ -25,18 +25,9 @@ const relativeDate = (value) => {
 };
 const sourceLabel = (source) =>
   ({ nuvio: "Nuvio", trakt: "Trakt", simkl: "Simkl" })[source] || source;
-const playbackTime = (milliseconds) => {
-  const totalSeconds = Math.max(0, Math.round(Number(milliseconds || 0) / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return hours
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-    : `${minutes}:${String(seconds).padStart(2, "0")}`;
-};
 
 export async function renderStatistics(container, { api, run, openDialog }) {
-  container.innerHTML = `<section id="stats-now-playing" class="panel stats-now-playing" aria-live="polite"></section><div class="title-row"><div><h1>Statistiques</h1><p class="muted">Comparez l’activité et les habitudes de visionnage de tous les profils.</p></div><div class="stats-controls"><div class="stats-profile-filter"><span class="stats-control-label">Profils</span><details id="stats-profile-menu" class="stats-profile-menu"><summary><span id="stats-profile-summary">Tous les profils</span><span class="stats-profile-chevron" aria-hidden="true">⌄</span></summary><div class="stats-profile-popover"><div class="stats-profile-actions"><button type="button" id="stats-select-all">Tout sélectionner</button><button type="button" id="stats-select-none" class="quiet">Tout désélectionner</button></div><div id="stats-profile-list" class="stats-profile-list" role="group" aria-label="Profils à comparer"></div></div></details></div><label>Période<select id="stats-days"><option value="30">30 jours</option><option value="90">90 jours</option><option value="365">1 an</option><option value="0">Tout l’historique</option></select></label><button id="stats-refresh">Actualiser</button></div></div><p id="stats-status" role="status">Chargement des historiques…</p><div id="stats-view"></div>`;
+  container.innerHTML = `<div class="title-row"><div><h1>Statistiques</h1><p class="muted">Comparez l’activité et les habitudes de visionnage de tous les profils.</p></div><div class="stats-controls"><div class="stats-profile-filter"><span class="stats-control-label">Profils</span><details id="stats-profile-menu" class="stats-profile-menu"><summary><span id="stats-profile-summary">Tous les profils</span><span class="stats-profile-chevron" aria-hidden="true">⌄</span></summary><div class="stats-profile-popover"><div class="stats-profile-actions"><button type="button" id="stats-select-all">Tout sélectionner</button><button type="button" id="stats-select-none" class="quiet">Tout désélectionner</button></div><div id="stats-profile-list" class="stats-profile-list" role="group" aria-label="Profils à comparer"></div></div></details></div><label>Période<select id="stats-days"><option value="30">30 jours</option><option value="90">90 jours</option><option value="365">1 an</option><option value="0">Tout l’historique</option></select></label><button id="stats-refresh">Actualiser</button></div></div><p id="stats-status" role="status">Chargement des historiques…</p><div id="stats-view"></div>`;
   const $ = (selector) => container.querySelector(selector);
   const mediaDetails = new Map();
   const profileDetails = new Map();
@@ -76,10 +67,8 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       const data = await api(`statistics?${params}`);
       if (!container.isConnected) return;
       updateProfileOptions(data.availableProfiles || []);
-      render(data);
-      await loadNowPlaying();
-      if (!container.isConnected) return;
       $("#stats-status").textContent = `Mis à jour le ${date(data.generatedAt)} · données en consultation`;
+      render(data);
     } finally {
       if (container.isConnected) $("#stats-refresh").disabled = false;
     }
@@ -124,43 +113,6 @@ export async function renderStatistics(container, { api, run, openDialog }) {
     bindRankingPreviews();
     bindRecentShelf();
     bindDetailTriggers();
-  }
-  async function loadNowPlaying() {
-    const target = $("#stats-now-playing");
-    if (!target) return;
-    const result = await api("statistics/now-playing");
-    if (!target.isConnected) return;
-    mediaDetails.forEach((_, id) => {
-      if (id.startsWith("now-playing-")) mediaDetails.delete(id);
-    });
-    const items = result.items || [];
-    target.innerHTML = `<div class="stats-now-playing-heading"><div><h2>Lecture en cours</h2><p class="muted">Progression synchronisée par Nuvio.</p></div><small>${items.length ? `${items.length} lecture${items.length > 1 ? "s" : ""}` : ""}</small></div>${items.length ? `<div class="stats-now-playing-grid">${items.map((item, index) => {
-      const id = `now-playing-${index}-${item.ref}`;
-      mediaDetails.set(id, item);
-      const title = mediaTitle(item);
-      const poster = item?.metadata?.poster;
-      const background = backdrop(item);
-      const percent = Math.max(0, Math.min(100, item.duration ? (item.position / item.duration) * 100 : 0));
-      const episode = item.kind === "episode" && item.season != null
-        ? `Saison ${item.season} · Épisode ${item.episode}`
-        : item?.metadata?.year || "Film";
-      const avatar = item.avatarUrl
-        ? `<img src="${esc(item.avatarUrl)}" alt="" referrerpolicy="no-referrer">`
-        : `<span>${esc(item.profileName?.trim()?.slice(0, 1)?.toUpperCase() || "●")}</span>`;
-      return `<article class="stats-now-playing-item" tabindex="0" role="button" aria-label="Afficher les détails de ${esc(title)}" data-stats-media="${esc(id)}">${background ? `<img class="stats-card-bg" src="${esc(background)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<div class="stats-now-playing-overlay"></div><div class="stats-now-playing-content">${poster ? `<img class="stats-now-playing-poster" src="${esc(poster)}" alt="Jaquette de ${esc(title)}" loading="lazy" referrerpolicy="no-referrer">` : '<span class="stats-now-playing-poster" aria-hidden="true">▶</span>'}<div class="stats-now-playing-info"><div class="stats-now-playing-profile">${avatar}<span>${esc(item.profileName)}</span></div><h3>${esc(title)}</h3><p>${esc(episode)}</p><progress max="100" value="${percent}" aria-label="Progression de ${esc(title)}"></progress><div class="stats-now-playing-times"><span>${esc(playbackTime(item.position))}</span><span>${esc(playbackTime(item.duration))}</span></div></div></div></article>`;
-    }).join("")}</div>` : '<p class="empty-inline">Aucune lecture en cours.</p>'}`;
-    target.querySelectorAll("[data-stats-media]").forEach((element) => {
-      const show = () => {
-        const item = mediaDetails.get(element.dataset.statsMedia);
-        if (item) showMediaDetail(item);
-      };
-      element.addEventListener("click", show);
-      element.addEventListener("keydown", (event) => {
-        if (!["Enter", " "].includes(event.key)) return;
-        event.preventDefault();
-        show();
-      });
-    });
   }
   const metric = (label, value) => `<article class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></article>`;
   const mediaTitle = (item) => item?.metadata?.title || item?.title || item?.contentId || "Contenu inconnu";
@@ -522,11 +474,4 @@ export async function renderStatistics(container, { api, run, openDialog }) {
   };
   $("#stats-refresh").onclick = () => run(() => load(true));
   await load();
-  const nowPlayingTimer = setInterval(() => {
-    if (!container.isConnected) {
-      clearInterval(nowPlayingTimer);
-      return;
-    }
-    loadNowPlaying().catch(() => {});
-  }, 10_000);
 }
