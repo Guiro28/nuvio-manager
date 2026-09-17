@@ -172,6 +172,88 @@ const runtimeMinutes = (...values) => {
   return 0;
 };
 
+const trackerIds = (media) => {
+  const ids = media?.ids || {};
+  return [...new Set([
+    ids.imdb && String(ids.imdb),
+    ids.trakt && `trakt:${ids.trakt}`,
+    ids.simkl && `simkl:${ids.simkl}`,
+    ids.simkl_id && `simkl:${ids.simkl_id}`,
+    ids.tmdb && `tmdb:${ids.tmdb}`,
+    ids.tvdb && `tvdb:${ids.tvdb}`,
+  ].filter(Boolean))];
+};
+
+const playbackItem = (row) => {
+  const movie = row?.movie,
+    episode = row?.episode,
+    show = row?.show || row?.anime,
+    media = movie || show || episode || {};
+  return {
+    contentIds: trackerIds(media),
+    title: String(movie?.title || show?.title || episode?.title || ""),
+    kind: movie ? "movie" : "episode",
+    season: episode?.season ?? episode?.tvdb_season ?? null,
+    episode: episode?.number ?? episode?.episode ?? episode?.tvdb_number ?? null,
+  };
+};
+
+export async function traktNowPlaying(connection, config, fetchImpl = fetch) {
+  const fresh = await refreshTrakt(connection, config, fetchImpl);
+  const headers = traktHeaders(config, fresh.accessToken);
+  let slug = fresh.userSlug;
+  if (!slug) {
+    const settingsResult = await requestJson(`${TRAKT}/users/settings`, { headers }, fetchImpl);
+    assert(settingsResult.response.ok, "Statut Trakt indisponible", settingsResult.response.status === 401 ? 401 : 502);
+    const user = settingsResult.data?.user || {};
+    slug = user.ids?.slug || user.username;
+  }
+  assert(slug, "Profil Trakt introuvable", 502);
+  const updatedConnection = fresh.userSlug === slug ? fresh : { ...fresh, userSlug: slug };
+  const watchingResult = await requestJson(
+    `${TRAKT}/users/${encodeURIComponent(slug)}/watching?extended=full`,
+    { headers },
+    fetchImpl,
+  );
+  if (watchingResult.response.status === 204 || !watchingResult.data)
+    return { state: "inactive", item: null, connection: updatedConnection };
+  assert(watchingResult.response.ok, "Statut Trakt indisponible", watchingResult.response.status === 401 ? 401 : 502);
+  return {
+    state: "playing",
+    item: {
+      ...playbackItem(watchingResult.data),
+      startedAt: Date.parse(watchingResult.data.started_at) || 0,
+      expiresAt: Date.parse(watchingResult.data.expires_at) || 0,
+    },
+    connection: updatedConnection,
+  };
+}
+
+export async function simklPlayback(connection, config, fetchImpl = fetch) {
+  assert(config?.clientId, "Application Simkl non configurée", 400);
+  const url = new URL(`${SIMKL}/sync/playback`);
+  url.searchParams.set("client_id", config.clientId);
+  url.searchParams.set("app-name", "nuvio-manager");
+  url.searchParams.set("app-version", "0.1.0");
+  const { response, data } = await requestJson(
+    url,
+    { headers: simklHeaders(config, connection.accessToken) },
+    fetchImpl,
+  );
+  const detail = data?.error_description || data?.message || data?.error;
+  assert(
+    response.ok && Array.isArray(data),
+    `Progression Simkl indisponible${detail ? ` : ${detail}` : ` (HTTP ${response.status})`}`,
+    response.status === 401 ? 401 : response.status === 429 ? 429 : 502,
+  );
+  return data.map((row) => ({
+    ...playbackItem(row),
+    state: row.paused_at ? "paused" : "playing",
+    progress: Number(row.progress || 0),
+    at: Date.parse(row.paused_at || row.watched_at) || 0,
+  }));
+}
+
 function simklEvents(rows, sourceType) {
   const events = [];
   for (const item of rows || []) {

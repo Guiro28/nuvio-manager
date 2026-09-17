@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { startTrakt, pollTrakt, startSimkl, pollSimkl, traktHistory, simklHistory } from "../server/trackers.js";
+import { startTrakt, pollTrakt, startSimkl, pollSimkl, traktHistory, traktNowPlaying, simklHistory, simklPlayback } from "../server/trackers.js";
 
 const reply = (data, status = 200, headers = {}) => ({
   ok: status >= 200 && status < 300,
@@ -40,6 +40,33 @@ test("Trakt history follows pagination and normalizes movies and episodes", asyn
   assert.deepEqual(result.events.map((event) => event.durationMinutes), [110, 48]);
 });
 
+test("Trakt current watching is normalized independently for one profile", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url: String(url), headers: options.headers });
+    if (String(url).endsWith("/users/settings"))
+      return reply({ user: { username: "alice", ids: { slug: "alice" } } });
+    return reply({
+      started_at: "2026-09-17T10:00:00Z",
+      expires_at: "2026-09-17T12:00:00Z",
+      type: "episode",
+      episode: { season: 2, number: 4, title: "Épisode" },
+      show: { title: "Série", ids: { imdb: "tt200" } },
+    });
+  };
+  const result = await traktNowPlaying(
+    { accessToken: "token", refreshToken: "refresh", createdAt: Date.now(), expiresIn: 600000 },
+    { clientId: "client", clientSecret: "secret" },
+    fetchImpl,
+  );
+  assert.equal(result.state, "playing");
+  assert.equal(result.connection.userSlug, "alice");
+  assert.deepEqual(result.item.contentIds, ["tt200"]);
+  assert.equal(result.item.season, 2);
+  assert.equal(result.item.episode, 4);
+  assert.equal(requests.length, 2);
+});
+
 test("Simkl PIN and history normalize detailed episode timestamps", async () => {
   let call = 0;
   const authFetch = async () => ++call === 1
@@ -68,4 +95,28 @@ test("Simkl PIN and history normalize detailed episode timestamps", async () => 
   assert.equal(result.events[1].contentId, "tt20");
   assert.equal(result.events[1].episode, 2);
   assert.deepEqual(result.events.map((event) => event.durationMinutes), [120, 46]);
+});
+
+test("Simkl playback distinguishes active and paused sessions", async () => {
+  const fetchImpl = async (url, options) => {
+    assert.equal(url.pathname, "/sync/playback");
+    assert.equal(options.headers["simkl-api-key"], "client");
+    return reply([
+      { progress: 12.5, movie: { title: "Film", ids: { imdb: "tt10" } } },
+      {
+        progress: 45,
+        paused_at: "2026-09-17T10:30:00Z",
+        episode: { season: 1, number: 3 },
+        show: { title: "Série", ids: { imdb: "tt20" } },
+      },
+    ]);
+  };
+  const sessions = await simklPlayback(
+    { accessToken: "token" },
+    { clientId: "client" },
+    fetchImpl,
+  );
+  assert.deepEqual(sessions.map((item) => item.state), ["playing", "paused"]);
+  assert.deepEqual(sessions.map((item) => item.contentIds), [["tt10"], ["tt20"]]);
+  assert.equal(sessions[1].episode, 3);
 });

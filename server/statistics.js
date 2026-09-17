@@ -4,6 +4,7 @@ const DAY = 24 * 60 * 60 * 1000;
 // Nuvio exposes progress snapshots rather than an explicit player-closed event.
 // A short inactivity window prevents an abandoned title from lingering.
 export const NOW_PLAYING_MAX_AGE = 5 * 60 * 1000;
+export const NOW_PLAYING_LOOKBACK = 4 * 60 * 60 * 1000;
 const time = (value) => {
   const number = Number(value);
   if (Number.isFinite(number)) return number;
@@ -240,7 +241,7 @@ export async function collectNuvioNowPlaying(
   { getToken, rpc, getProfiles },
   now = Date.now(),
 ) {
-  const cutoff = now - NOW_PLAYING_MAX_AGE;
+  const cutoff = now - NOW_PLAYING_LOOKBACK;
   const items = [];
   for (const account of accounts) {
     const access = await getToken(account);

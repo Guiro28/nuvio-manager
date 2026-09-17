@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   collectNuvioNowPlaying,
-  NOW_PLAYING_MAX_AGE,
+  NOW_PLAYING_LOOKBACK,
   summarizeStatistics,
 } from "../server/statistics.js";
 
@@ -86,7 +86,7 @@ test("now playing uses only recent Nuvio progress and keeps one item per profile
         content_type: "movie",
         position: 600_000,
         duration: 7_200_000,
-        last_watched: now - NOW_PLAYING_MAX_AGE - 1,
+        last_watched: now - NOW_PLAYING_LOOKBACK - 1,
       },
     ],
   };
@@ -112,5 +112,5 @@ test("now playing uses only recent Nuvio progress and keeps one item per profile
   assert.equal(result[0].source, "nuvio");
   assert.equal(calls.length, 2);
   assert.equal(calls[0].route, "sync_pull_watch_progress");
-  assert.equal(calls[0].params.p_since_last_watched, now - NOW_PLAYING_MAX_AGE);
+  assert.equal(calls[0].params.p_since_last_watched, now - NOW_PLAYING_LOOKBACK);
 });
