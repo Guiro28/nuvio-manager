@@ -200,20 +200,9 @@ aside::after {
 .brand {
   position: relative;
   margin-bottom: 24px;
-  padding: 0 10px 25px;
+  padding: 0 10px;
   letter-spacing: 1px;
   font-size: 1.72rem;
-}
-
-.brand::after {
-  position: absolute;
-  bottom: 1px;
-  left: 76px;
-  content: "AURORA";
-  color: var(--purple-soft);
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.35em;
 }
 
 .brand-logo {
