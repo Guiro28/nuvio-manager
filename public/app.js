@@ -768,20 +768,89 @@ function createProfile() {
     });
   };
 }
+const PLATFORM_LABELS = { tv: "TV", mobile: "Mobile" };
+const LIST_LABELS = { addons: "Addons", plugins: "Plugins" };
+// Turns a raw diff value into readable French for the settings view.
+const friendlyValue = (x) => {
+  if (x === true) return "Activé";
+  if (x === false) return "Désactivé";
+  if (x === null || x === undefined || x === "") return "Absent";
+  if (typeof x === "string" || typeof x === "number") return String(x);
+  return JSON.stringify(x);
+};
+// Compares two addon/plugin lists (matched by url) into readable entries.
+function diffList(before, after) {
+  const b = Array.isArray(before) ? before : [],
+    a = Array.isArray(after) ? after : [],
+    bByUrl = new Map(b.map((x) => [x.url, x])),
+    aByUrl = new Map(a.map((x) => [x.url, x])),
+    rows = [];
+  for (const item of a) {
+    const prev = bByUrl.get(item.url),
+      name = item.name || item.url;
+    if (!prev) {
+      rows.push({ tone: "add", badge: "Ajouté", name });
+      continue;
+    }
+    const notes = [];
+    if ((prev.name || "") !== (item.name || ""))
+      notes.push(`renommé « ${prev.name || "—"} » → « ${item.name || "—"} »`);
+    if ((prev.enabled !== false) !== (item.enabled !== false))
+      notes.push(item.enabled !== false ? "activé" : "désactivé");
+    if (notes.length) rows.push({ tone: "mod", badge: "Modifié", name, note: notes.join(" · ") });
+  }
+  for (const item of b)
+    if (!aByUrl.has(item.url)) rows.push({ tone: "del", badge: "Retiré", name: item.name || item.url });
+  const common = (list, other) => list.map((x) => x.url).filter((url) => other.has(url));
+  const bOrder = common(b, aByUrl),
+    aOrder = common(a, bByUrl);
+  if (bOrder.length === aOrder.length && bOrder.some((url, i) => url !== aOrder[i]))
+    rows.push({ tone: "mod", badge: "Ordre", name: "Ordre de la liste modifié" });
+  return rows;
+}
+// Renders the whole diff grouped by section, readable instead of raw JSON.
+function renderDiff(diff) {
+  const lists = [],
+    settings = [];
+  for (const d of diff) {
+    if (d.path[0] === "addons" || d.path[0] === "plugins") {
+      lists.push({ title: LIST_LABELS[d.path[0]], items: diffList(d.before, d.after) });
+      continue;
+    }
+    const secret = /key|token|password|secret/i.test(d.path.join(".")),
+      platform = PLATFORM_LABELS[d.path[0]],
+      label = (platform ? [platform, ...d.path.slice(1).map(human)] : d.path.map(human)).join(" › ");
+    settings.push({
+      label,
+      before: secret ? "Valeur masquée" : friendlyValue(d.before),
+      after: secret ? "Valeur masquée" : friendlyValue(d.after),
+    });
+  }
+  let html = lists
+    .map(
+      (group) =>
+        `<div class="diff-group"><div class="diff-group-title">${esc(group.title)}</div>${group.items
+          .map(
+            (it) =>
+              `<div class="diff-item"><span class="badge diff-badge ${it.tone}">${esc(it.badge)}</span><span class="diff-item-name">${esc(it.name)}</span>${it.note ? `<span class="muted diff-item-note">${esc(it.note)}</span>` : ""}</div>`,
+          )
+          .join("") || '<div class="diff-item muted">Aucun changement</div>'}</div>`,
+    )
+    .join("");
+  if (settings.length)
+    html += `<div class="diff-group"><div class="diff-group-title">Paramètres</div>${settings
+      .map(
+        (r) =>
+          `<div class="diff-row"><div class="diff-label">${esc(r.label)}</div><div class="diff-values"><div class="old">− ${esc(r.before)}</div><div class="new">+ ${esc(r.after)}</div></div></div>`,
+      )
+      .join("")}</div>`;
+  return html;
+}
 async function preview(data) {
   const result = await api("preview", data);
   if (!result.count) return toast("Aucune modification à appliquer.");
   openDialog(
-    `<h2>${result.count} modification${result.count > 1 ? "s" : ""} à vérifier</h2><p class="muted">Une sauvegarde du compte cible sera créée avant l’enregistrement.</p><div class="diff">${result.diff
-      .map((d) => {
-        const secret = /key|token|password|secret/i.test(d.path.join("."));
-        const v = (x) =>
-          secret ? "Valeur masquée" : (JSON.stringify(x) ?? "Absent");
-        return `<div class="diff-row"><code>${esc(d.path.join(" › "))}</code><div class="diff-values"><div class="old">− ${esc(v(d.before))}</div><div class="new">+ ${esc(v(d.after))}</div></div></div>`;
-      })
-      .join(
-        "",
-      )}</div><div id="apply-error"></div><div class="dialog-actions"><button data-close>Annuler</button><button id="apply" class="primary">Enregistrer dans Nuvio</button></div>`,
+    `<h2>${result.count} modification${result.count > 1 ? "s" : ""} à vérifier</h2><p class="muted">Une sauvegarde du compte cible sera créée avant l’enregistrement.</p><div class="diff">${renderDiff(result.diff)}</div><div id="apply-error"></div><div class="dialog-actions"><button data-close>Annuler</button><button id="apply" class="primary">Enregistrer dans Nuvio</button></div>`,
   );
   $("#apply").onclick = async () => {
     const button = $("#apply");
