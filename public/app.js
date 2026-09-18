@@ -37,7 +37,8 @@ let state,
   openSettingGroups = { tv: new Set(), mobile: new Set() },
   historyTab = "progress",
   pairTimer,
-  homeTimer;
+  homeTimer,
+  perfTimer;
 const labels = {
   home: "Accueil",
   profiles: "Comptes & profils",
@@ -216,6 +217,7 @@ async function loadProfile() {
 async function render() {
   await refreshState();
   clearInterval(homeTimer);
+  clearInterval(perfTimer);
   $("#crumb").textContent = labels[page];
   $$("#nav button").forEach((b) =>
     b.classList.toggle("active", b.dataset.page === page),
@@ -251,33 +253,90 @@ const fmtUptime = (seconds) => {
 };
 const homeMetric = (label, value) =>
   `<article class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></article>`;
-// Rolling CPU/RAM history, filled by the home-page polling and drawn as a live
-// trend chart. Reset each time the page opens.
-let perfHistory = [];
-function pushPerf(d) {
-  perfHistory.push({ cpu: Math.max(0, Math.min(100, d.cpu.percent || 0)), rss: Number(d.memory.rss) || 0 });
-  if (perfHistory.length > 60) perfHistory.shift();
-}
-function perfChart() {
-  const W = 600, H = 150, padL = 10, padR = 10, padT = 10, padB = 10,
-    plotW = W - padL - padR, plotH = H - padT - padB,
-    hist = perfHistory,
-    n = hist.length,
-    ramMax = Math.max(1, ...hist.map((p) => p.rss)) * 1.15,
-    x = (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * plotW),
-    yCpu = (v) => padT + plotH - (Math.max(0, Math.min(100, v)) / 100) * plotH,
-    yRam = (v) => padT + plotH - (v / ramMax) * plotH,
-    poly = (get, yFn) => hist.map((p, i) => `${x(i).toFixed(1)},${yFn(get(p)).toFixed(1)}`).join(" "),
-    grid = [0, 50, 100]
-      .map((v) => `<line class="perf-grid" vector-effect="non-scaling-stroke" x1="${padL}" y1="${yCpu(v).toFixed(1)}" x2="${W - padR}" y2="${yCpu(v).toFixed(1)}"></line>`)
+// Latest fetched series + window, kept for the hover interaction.
+let perfSeries = [];
+let perfPeriodSec = 86400;
+// Draws a CPU/RAM time series on a real time axis, with a % grid (labels on the
+// left). RAM shares the plot, auto-scaled; its value shows in the hover tooltip.
+function perfChart(series, periodSeconds) {
+  const W = 600, H = 160, padT = 8, padB = 8, plotH = H - padT - padB,
+    n = series.length,
+    ramMax = Math.max(1, ...series.map((p) => p.rss)) * 1.15,
+    tEnd = Date.now(),
+    tStart = tEnd - (Number(periodSeconds) || 86400) * 1000,
+    span = Math.max(1, tEnd - tStart),
+    xf = (t) => Math.max(0, Math.min(1, (t - tStart) / span)),
+    yCpu = (v) => padT + (1 - Math.max(0, Math.min(100, v)) / 100) * plotH,
+    yRam = (v) => padT + (1 - v / ramMax) * plotH,
+    poly = (get, yFn) => series.map((p) => `${(xf(p.t) * W).toFixed(1)},${yFn(get(p)).toFixed(1)}`).join(" "),
+    grid = [0, 25, 50, 75, 100]
+      .map((v) => `<line class="perf-grid" vector-effect="non-scaling-stroke" x1="0" y1="${yCpu(v).toFixed(1)}" x2="${W}" y2="${yCpu(v).toFixed(1)}"></line>`)
       .join(""),
-    lines =
+    labels = [100, 75, 50, 25, 0].map((v) => `<span style="top:${(yCpu(v) / H * 100).toFixed(1)}%">${v} %</span>`).join(""),
+    inner =
       n < 2
-        ? ""
-        : `<polyline class="perf-line perf-ram" vector-effect="non-scaling-stroke" points="${poly((p) => p.rss, yRam)}"></polyline><polyline class="perf-line perf-cpu" vector-effect="non-scaling-stroke" points="${poly((p) => p.cpu, yCpu)}"></polyline>`;
-  return `<svg class="perf-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Utilisation CPU et RAM dans le temps">${grid}${lines}</svg>${n < 2 ? '<p class="muted perf-hint">Collecte des données…</p>' : ""}`;
+        ? grid
+        : `${grid}<polyline class="perf-line perf-ram" vector-effect="non-scaling-stroke" points="${poly((p) => p.rss, yRam)}"></polyline><polyline class="perf-line perf-cpu" vector-effect="non-scaling-stroke" points="${poly((p) => p.cpu, yCpu)}"></polyline>`;
+  return `<div class="perf-plot"><div class="perf-yaxis">${labels}</div><div class="perf-canvas"><svg class="perf-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Utilisation CPU et RAM dans le temps">${inner}</svg><div class="perf-cursor" hidden></div></div></div>${n < 2 ? '<p class="muted perf-hint">Pas encore assez de données sur cette période.</p>' : ""}`;
 }
-function homeMarkup(d) {
+function bindPerfHover() {
+  const canvas = $(".perf-canvas"),
+    cursor = $(".perf-cursor");
+  if (!canvas || !cursor || perfSeries.length < 2) return;
+  let tip = document.querySelector(".perf-tip");
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.className = "perf-tip";
+    tip.hidden = true;
+    document.body.appendChild(tip);
+  }
+  const tEnd = Date.now(),
+    tStart = tEnd - perfPeriodSec * 1000,
+    span = Math.max(1, tEnd - tStart);
+  const move = (event) => {
+    const rect = canvas.getBoundingClientRect(),
+      frac = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+      targetT = tStart + frac * span;
+    let best = perfSeries[0], bestD = Infinity;
+    for (const p of perfSeries) {
+      const d = Math.abs(p.t - targetT);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    cursor.style.left = `${((best.t - tStart) / span) * rect.width}px`;
+    cursor.hidden = false;
+    tip.innerHTML = `<div class="perf-tip-time">${new Date(best.t).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div><div><i class="cpu"></i>CPU <b>${Math.round(best.cpu)} %</b></div><div><i class="ram"></i>RAM <b>${esc(fmtBytes(best.rss))}</b></div>`;
+    tip.hidden = false;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    tip.style.left = `${Math.max(6, Math.min(event.clientX - tw / 2, window.innerWidth - tw - 6))}px`;
+    tip.style.top = `${Math.max(6, event.clientY - th - 16)}px`;
+  };
+  canvas.addEventListener("mousemove", move);
+  canvas.addEventListener("mouseleave", () => { cursor.hidden = true; tip.hidden = true; });
+}
+const PERF_PERIODS = [
+  ["3600", "1 heure"], ["7200", "2 heures"], ["21600", "6 heures"],
+  ["43200", "12 heures"], ["86400", "1 jour"], ["172800", "2 jours"], ["604800", "1 semaine"],
+];
+function homeSkeleton() {
+  const options = PERF_PERIODS.map(([v, l]) => `<option value="${v}"${v === "86400" ? " selected" : ""}>${l}</option>`).join("");
+  return `<h2 class="home-heading">Système</h2><section class="stats-metrics" id="home-system"></section>` +
+    `<div class="panel perf-panel"><div class="perf-head"><h3>Utilisation dans le temps</h3><div class="perf-legend"><span><i class="cpu"></i> CPU <b id="perf-cpu">—</b></span><span><i class="ram"></i> RAM <b id="perf-ram">—</b></span></div><select id="perf-period" class="perf-period" aria-label="Période affichée">${options}</select></div><div id="perf-host"><p class="muted perf-hint">Chargement…</p></div></div>` +
+    `<h2 class="home-heading">Réseau · proxy</h2><section class="stats-metrics" id="home-network"></section>` +
+    `<h2 class="home-heading">Instance</h2><section class="stats-metrics" id="home-instance"></section>` +
+    `<p class="footer-note">Le trafic est compté depuis le démarrage de l’instance et cumulé dans le volume de données. L’historique CPU/RAM est conservé une semaine.</p>`;
+}
+function updateHomeTiles(d) {
+  const system = [
+    homeMetric("Mémoire du process", fmtBytes(d.memory.rss)),
+    homeMetric("Mémoire système", fmtBytes(d.memory.used)),
+    homeMetric("Processeur", `${Math.round(d.cpu.percent)} %`),
+    homeMetric("Uptime", fmtUptime(d.uptime)),
+  ].join("");
+  const network = [
+    homeMetric("Proxy interne", fmtBytes(d.bandwidth.direct)),
+    homeMetric("Proxy externe", fmtBytes(d.bandwidth.warp)),
+    homeMetric("Trafic total", fmtBytes((d.bandwidth.direct || 0) + (d.bandwidth.warp || 0))),
+  ].join("");
   const instance = [
     homeMetric("Comptes Nuvio", d.accounts),
     homeMetric("Profils", d.profiles),
@@ -288,44 +347,45 @@ function homeMarkup(d) {
     homeMetric("Sauvegardes", d.backups),
     homeMetric("TMDB", d.tmdbConfigured ? "Configuré" : "Non configuré"),
   ].join("");
-  const system = [
-    homeMetric("Mémoire du process", fmtBytes(d.memory.rss)),
-    homeMetric("Mémoire système", fmtBytes(d.memory.used)),
-    homeMetric("Processeur", `${Math.round(d.cpu.percent)} %`),
-    homeMetric("Uptime", fmtUptime(d.uptime)),
-  ].join("");
-  const total = (d.bandwidth.direct || 0) + (d.bandwidth.warp || 0);
-  const network = [
-    homeMetric("Trafic interne", fmtBytes(d.bandwidth.direct)),
-    homeMetric("Trafic externe", fmtBytes(d.bandwidth.warp)),
-    homeMetric("Trafic total", fmtBytes(total)),
-    homeMetric("Proxy externe", d.proxyExternal.configured ? "Configuré" : "Désactivé"),
-  ].join("");
-  return `<h2 class="home-heading">Instance</h2><section class="stats-metrics">${instance}</section><h2 class="home-heading">Système</h2><section class="stats-metrics">${system}</section><div class="panel perf-panel"><div class="perf-head"><h3>Utilisation dans le temps</h3><div class="perf-legend"><span><i class="cpu"></i> CPU ${Math.round(d.cpu.percent)} %</span><span><i class="ram"></i> RAM ${esc(fmtBytes(d.memory.rss))}</span></div></div>${perfChart()}</div><h2 class="home-heading">Réseau · proxy</h2><section class="stats-metrics">${network}</section><p class="footer-note">Le trafic est compté depuis le démarrage de l’instance et cumulé dans le volume de données.</p>`;
+  const set = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
+  set("#home-system", system);
+  set("#home-network", network);
+  set("#home-instance", instance);
+  const cpuEl = $("#perf-cpu"); if (cpuEl) cpuEl.textContent = `${Math.round(d.cpu.percent)} %`;
+  const ramEl = $("#perf-ram"); if (ramEl) ramEl.textContent = fmtBytes(d.memory.rss);
 }
 async function renderHome() {
   const c = $("#content");
-  perfHistory = [];
-  c.innerHTML =
-    heading("Accueil", "Vue d’ensemble de l’instance et de son activité.") +
-    '<div id="home-view"><p class="muted">Chargement…</p></div>';
-  const view = $("#home-view");
-  const paint = async () => {
+  c.innerHTML = heading("Accueil", "Vue d’ensemble de l’instance et de son activité.") + homeSkeleton();
+  const loadTiles = async () => {
     let data;
-    try {
-      data = await api("overview");
-    } catch {
-      return;
-    }
-    if (!view.isConnected) return;
-    pushPerf(data);
-    view.innerHTML = homeMarkup(data);
+    try { data = await api("overview"); } catch { return; }
+    if ($("#home-system")) updateHomeTiles(data);
   };
-  await paint();
+  const loadChart = async () => {
+    const period = $("#perf-period")?.value;
+    if (!period) return;
+    let result;
+    try { result = await api(`metrics/history?period=${period}`); } catch { return; }
+    const host = $("#perf-host");
+    if (!host) return;
+    perfSeries = result.series || [];
+    perfPeriodSec = Number(period);
+    host.innerHTML = perfChart(perfSeries, period);
+    bindPerfHover();
+  };
+  $("#perf-period").onchange = () => run(loadChart);
+  await loadTiles();
+  await loadChart();
+  clearInterval(perfTimer);
   homeTimer = setInterval(() => {
-    if (!view.isConnected) return clearInterval(homeTimer);
-    paint().catch(() => {});
+    if (!$("#home-system")?.isConnected) return clearInterval(homeTimer);
+    loadTiles().catch(() => {});
   }, 5000);
+  perfTimer = setInterval(() => {
+    if (!$("#perf-host")?.isConnected) return clearInterval(perfTimer);
+    loadChart().catch(() => {});
+  }, 30000);
 }
 function emptyAccounts() {
   return `<div class="empty"><div class="empty-symbol">▦</div><h2>Vos profils, au même endroit.</h2><p class="muted">Connectez un compte Nuvio pour retrouver ses profils, modifier les réglages TV et Mobile et leur attribuer vos addons.</p>${btn("＋ Connecter un compte", "connect", "primary")}<p class="footer-note">La connexion se valide sur le site officiel Nuvio.<br>Votre mot de passe reste sur Nuvio.</p></div>`;

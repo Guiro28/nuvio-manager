@@ -64,11 +64,16 @@ export function summarizeStatistics(profiles, days = 30, now = Date.now()) {
     start.setHours(0, 0, 0, 0);
     const end = start.getTime() + DAY;
     const dayEvents = allEvents.filter((event) => event.at >= start && event.at < end);
+    const perProfile = new Map();
+    for (const event of dayEvents) perProfile.set(event.ref, (perProfile.get(event.ref) || 0) + 1);
     timeline.push({
       date: start.toISOString().slice(0, 10),
       count: dayEvents.length,
       movies: dayEvents.filter((event) => event.kind === "movie").length,
       series: dayEvents.filter((event) => event.kind === "episode").length,
+      profiles: [...perProfile.entries()]
+        .map(([ref, count]) => ({ ref, count }))
+        .sort((a, b) => b.count - a.count),
     });
   }
   const popularity = new Map();

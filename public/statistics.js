@@ -26,6 +26,7 @@ const relativeDate = (value) => {
 const sourceLabel = (source) =>
   ({ nuvio: "Nuvio", trakt: "Trakt", simkl: "Simkl" })[source] || source;
 
+let statsResizeHandler = null;
 export async function renderStatistics(container, { api, run, openDialog }) {
   container.innerHTML = `<div class="title-row"><div><h1>Statistiques</h1><p class="muted">Comparez l’activité et les habitudes de visionnage de tous les profils.</p></div><div class="stats-controls"><div class="stats-profile-filter"><span class="stats-control-label">Profils</span><details id="stats-profile-menu" class="stats-profile-menu"><summary><span id="stats-profile-summary">Tous les profils</span><span class="stats-profile-chevron" aria-hidden="true">⌄</span></summary><div class="stats-profile-popover"><div class="stats-profile-actions"><button type="button" id="stats-select-all">Tout sélectionner</button><button type="button" id="stats-select-none" class="quiet">Tout désélectionner</button></div><div id="stats-profile-list" class="stats-profile-list" role="group" aria-label="Profils à comparer"></div></div></details></div><label>Période<select id="stats-days"><option value="30">30 jours</option><option value="90">90 jours</option><option value="365">1 an</option><option value="0">Tout l’historique</option></select></label><button id="stats-refresh">Actualiser</button></div></div><p id="stats-status" role="status">Chargement des historiques…</p><div id="stats-view"></div>`;
   const $ = (selector) => container.querySelector(selector);
@@ -73,6 +74,62 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       if (container.isConnected) $("#stats-refresh").disabled = false;
     }
   }
+  function paintTimeline() {
+    const host = $("#stats-timeline");
+    if (!host || !currentData) return;
+    const width = host.clientWidth || host.parentElement?.clientWidth || 900;
+    host.innerHTML = timelineChart(currentData.timeline, width);
+    bindTimelineTooltip(host);
+  }
+  const tipAvatar = (info) => {
+    const initial = esc((info?.profileName || "").trim().slice(0, 1).toUpperCase() || "•");
+    return `<span class="stats-daytip-avatar">${info?.avatarUrl ? `<img src="${esc(info.avatarUrl)}" alt="" referrerpolicy="no-referrer">` : ""}<span>${initial}</span></span>`;
+  };
+  const dayTipContent = (day) => {
+    const dateLabel = new Date(`${day.date}T00:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+    const rows = (day.profiles || [])
+      .map((entry) => {
+        const info = profileDetails.get(entry.ref);
+        return `<li>${tipAvatar(info)}<span class="stats-daytip-name">${esc(info?.profileName || "Profil")}</span><strong>${entry.count}</strong></li>`;
+      })
+      .join("");
+    return `<div class="stats-daytip-head"><span>${esc(dateLabel)}</span><span>${day.count} lecture${day.count > 1 ? "s" : ""}</span></div><ul>${rows || '<li class="muted">Aucune lecture</li>'}</ul>`;
+  };
+  function bindTimelineTooltip(host) {
+    // A single viewport-fixed tooltip, reused across renders, so it can always
+    // sit just above the cursor without being clipped by the chart.
+    let tip = document.querySelector(".stats-daytip");
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.className = "stats-daytip";
+      tip.hidden = true;
+      document.body.appendChild(tip);
+    }
+    const place = (day, clientX, clientY) => {
+      tip.innerHTML = dayTipContent(day);
+      tip.hidden = false;
+      const tipW = tip.offsetWidth,
+        tipH = tip.offsetHeight;
+      let left = clientX - tipW / 2;
+      left = Math.max(6, Math.min(left, window.innerWidth - tipW - 6));
+      let top = Math.max(6, clientY - tipH - 16);
+      tip.style.left = `${left}px`;
+      tip.style.top = `${top}px`;
+    };
+    host.querySelectorAll(".timeline-day").forEach((bar) => {
+      const day = currentData.timeline[Number(bar.dataset.day)];
+      if (!day || !day.count) return;
+      const follow = (event) => place(day, event.clientX, event.clientY);
+      bar.addEventListener("mouseenter", follow);
+      bar.addEventListener("mousemove", follow);
+      bar.addEventListener("mouseleave", () => { tip.hidden = true; });
+      bar.addEventListener("focus", () => {
+        const r = bar.getBoundingClientRect();
+        place(day, r.left + r.width / 2, r.top);
+      });
+      bar.addEventListener("blur", () => { tip.hidden = true; });
+    });
+  }
   function render(data) {
     currentData = data;
     mediaDetails.clear();
@@ -99,7 +156,7 @@ export async function renderStatistics(container, { api, run, openDialog }) {
         ${metric("Titres uniques", data.totals.uniqueTitles)}
         ${metric("Temps suivi estimé", duration(data.totals.trackedMinutes))}
       </section>
-      <section class="panel stats-section"><div class="section-heading"><div><h2>Activité quotidienne</h2><p class="muted">Lectures terminées par jour, toutes sources confondues.</p></div><div class="timeline-legend" aria-label="Légende"><span><i class="movie"></i> Films</span><span><i class="series"></i> Séries</span></div></div>${timelineChart(data.timeline)}</section>
+      <section class="panel stats-section"><div class="section-heading"><div><h2>Activité quotidienne</h2><p class="muted">Lectures terminées par jour, toutes sources confondues.</p></div><div class="timeline-legend" aria-label="Légende"><span><i class="movie"></i> Films</span><span><i class="series"></i> Séries</span></div></div><div id="stats-timeline"></div></section>
       <section class="stats-dashboard-grid">
         ${rankingCard("Séries les plus regardées", rankings.watchedSeries, "Lectures", "plays")}
         ${rankingCard("Séries les plus populaires", rankings.popularSeries, "Profils", "profiles")}
@@ -113,6 +170,7 @@ export async function renderStatistics(container, { api, run, openDialog }) {
     bindRankingPreviews();
     bindRecentShelf();
     bindDetailTriggers();
+    paintTimeline();
   }
   const metric = (label, value) => `<article class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></article>`;
   const mediaTitle = (item) => item?.metadata?.title || item?.title || item?.contentId || "Contenu inconnu";
@@ -410,21 +468,30 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       if (profile) showProfileDetail(profile);
     }));
   };
-  const timelineChart = (items) => {
-    const values = items.map((item) => Number(item.count) || 0),
-      maxDay = Math.max(1, ...values),
-      step = items.length > 60 ? 18 : 27,
-      barWidth = items.length > 60 ? 11 : 16,
+  const timelineChart = (items, availableWidth = 900) => {
+    // Bars widen/narrow to fill the tile up to maxFinesse days; beyond that the
+    // slot width is capped and the chart scrolls horizontally.
+    const count = items.length || 1,
       left = 50,
-      width = Math.max(720, items.length * step + left + 22),
+      rightPad = 22,
+      maxFinesse = 50,
+      avail = Math.max(360, Math.floor(availableWidth) - 2),
+      plotWidth = Math.max(140, avail - left - rightPad),
+      step = plotWidth / Math.min(count, maxFinesse),
+      barWidth = Math.max(3, Math.min(30, step * 0.62)),
+      width = left + count * step + rightPad,
+      labelEvery = Math.max(1, Math.round(58 / step)),
+      values = items.map((item) => Number(item.count) || 0),
+      maxDay = Math.max(1, ...values),
       baseline = 190,
       plotHeight = 142,
-      labelEvery = items.length > 60 ? 10 : 5,
       totalPeriod = values.reduce((sum, value) => sum + value, 0),
       average = items.length ? totalPeriod / items.length : 0,
       peakIndex = values.indexOf(maxDay),
       peak = items[peakIndex],
-      scale = (value) => value / maxDay,
+      // Square-root scale so spike days don't crush the readability of quiet
+      // days. Axis labels stay round values; gridlines compress toward the top.
+      scale = (value) => Math.sqrt(Math.max(0, value)) / Math.sqrt(maxDay),
       compact = (value) => new Intl.NumberFormat("fr-FR", {
         notation: "compact",
         maximumFractionDigits: value >= 1000 ? 1 : 0,
@@ -437,7 +504,7 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       };
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
       const value = maxDay * ratio;
-      const y = baseline - plotHeight * ratio;
+      const y = baseline - plotHeight * Math.sqrt(ratio);
       return `<g class="timeline-gridline"><line x1="${left - 4}" y1="${y}" x2="${width - 12}" y2="${y}"></line><text x="${left - 10}" y="${y + 3}">${compact(value)}</text></g>`;
     }).join("");
     const bars = items.map((item, index) => {
@@ -449,10 +516,10 @@ export async function renderStatistics(container, { api, run, openDialog }) {
         totalHeight = scale(total) * plotHeight,
         movieHeight = total ? totalHeight * (movies / breakdownTotal) : 0,
         seriesHeight = total ? totalHeight * (series / breakdownTotal) : 0,
-        x = left + index * step,
+        x = left + index * step + (step - barWidth) / 2,
         title = `${shortDate(item.date)} · ${total} lecture${total > 1 ? "s" : ""} · ${movies} film${movies > 1 ? "s" : ""} · ${series} épisode${series > 1 ? "s" : ""}`,
         showValue = total && (index === peakIndex || total >= average * 2 || items.length <= 14);
-      return `<g class="timeline-day" tabindex="0" role="img" aria-label="${esc(title)}"><title>${esc(title)}</title>${total ? `${seriesHeight ? `<rect class="timeline-series" x="${x}" y="${baseline - totalHeight}" width="${barWidth}" height="${seriesHeight}" rx="3"></rect>` : ""}${movieHeight ? `<rect class="timeline-movie" x="${x}" y="${baseline - movieHeight}" width="${barWidth}" height="${movieHeight}" rx="3"></rect>` : ""}${showValue ? `<text class="timeline-total" x="${x + barWidth / 2}" y="${Math.max(16, baseline - totalHeight - 7)}">${compact(total)}</text>` : ""}` : `<rect class="timeline-empty" x="${x}" y="${baseline - 2}" width="${barWidth}" height="2" rx="1"></rect>`}${index % labelEvery === 0 || index === items.length - 1 ? `<text class="timeline-date" x="${x + barWidth / 2}" y="${baseline + 21}">${esc(shortDate(item.date))}</text>` : ""}</g>`;
+      return `<g class="timeline-day" data-day="${index}" tabindex="0" role="img" aria-label="${esc(title)}"><rect class="timeline-hit" x="${left + index * step}" y="${baseline - plotHeight}" width="${step}" height="${plotHeight}"></rect>${total ? `${seriesHeight ? `<rect class="timeline-series" x="${x}" y="${baseline - totalHeight}" width="${barWidth}" height="${seriesHeight}" rx="3"></rect>` : ""}${movieHeight ? `<rect class="timeline-movie" x="${x}" y="${baseline - movieHeight}" width="${barWidth}" height="${movieHeight}" rx="3"></rect>` : ""}${showValue ? `<text class="timeline-total" x="${x + barWidth / 2}" y="${Math.max(16, baseline - totalHeight - 7)}">${compact(total)}</text>` : ""}` : `<rect class="timeline-empty" x="${x}" y="${baseline - 2}" width="${barWidth}" height="2" rx="1"></rect>`}${index % labelEvery === 0 || index === items.length - 1 ? `<text class="timeline-date" x="${x + barWidth / 2}" y="${baseline + 21}">${esc(shortDate(item.date))}</text>` : ""}</g>`;
     }).join("");
     return `<div class="timeline-summary"><div><span>Total de la période</span><strong>${compact(totalPeriod)} lectures</strong></div><div><span>Moyenne quotidienne</span><strong>${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(average)}</strong></div><div><span>Jour le plus actif</span><strong>${peak ? `${shortDate(peak.date)} · ${compact(maxDay)}` : "Aucune activité"}</strong></div></div><div class="timeline-scroll"><svg class="timeline-chart" style="width:${width}px" viewBox="0 0 ${width} 226" role="img" aria-label="Activité quotidienne : films en jaune et épisodes de séries en rouge.">${ticks}<line class="timeline-axis" x1="${left - 4}" y1="${baseline}" x2="${width - 12}" y2="${baseline}"></line>${bars}</svg></div>`;
   };
@@ -473,5 +540,15 @@ export async function renderStatistics(container, { api, run, openDialog }) {
     run(load);
   };
   $("#stats-refresh").onclick = () => run(() => load(true));
+  // Repaint the timeline to the tile width on resize (debounced, single handler).
+  if (statsResizeHandler) window.removeEventListener("resize", statsResizeHandler);
+  let resizeTimer;
+  statsResizeHandler = () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if ($("#stats-timeline")?.isConnected) paintTimeline();
+    }, 150);
+  };
+  window.addEventListener("resize", statsResizeHandler);
   await load();
 }

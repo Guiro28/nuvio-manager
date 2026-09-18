@@ -132,19 +132,65 @@ function account(id) {
 const connectionRef = (accountId, profileId) => `${accountId}:${profileId}`;
 const trackerConfig = (service) => panel.trackerApps?.[service] || {};
 const savePanel = () => db.write("panel-settings", panel);
-// Rolling process CPU usage (%). Compares cpuUsage deltas between calls, so the
-// ~5s home-page polling produces a live figure normalized over all cores.
-let lastCpu = process.cpuUsage(),
-  lastCpuAt = Date.now();
-function cpuPercent() {
-  const current = process.cpuUsage(),
-    now = Date.now(),
-    elapsedMs = now - lastCpuAt || 1,
-    cpuMs = (current.user - lastCpu.user + current.system - lastCpu.system) / 1000,
+// Background sampling of process CPU% and RSS, kept as a 1-week history in the
+// data volume for the home-page chart. A single sampler owns the cpuUsage delta
+// so nothing else has to recompute it.
+const METRICS_SAMPLE_MS = 15_000,
+  METRICS_STEP_MS = 60_000, // 1-minute history resolution
+  METRICS_KEEP_MS = 7 * 24 * 60 * 60 * 1000,
+  METRICS_PERSIST_MS = 5 * 60_000;
+let metricsHistory = db.read("metrics", []);
+if (!Array.isArray(metricsHistory)) metricsHistory = [];
+let latestSample = { cpu: 0, rss: process.memoryUsage().rss };
+let sampleLastCpu = process.cpuUsage(),
+  sampleLastAt = Date.now(),
+  lastHistoryAt = metricsHistory.at(-1)?.t || 0,
+  lastMetricsPersist = Date.now();
+function sampleMetrics() {
+  const now = Date.now(),
+    current = process.cpuUsage(),
+    elapsedMs = now - sampleLastAt || 1,
+    cpuMs = (current.user - sampleLastCpu.user + current.system - sampleLastCpu.system) / 1000,
     cores = os.cpus().length || 1;
-  lastCpu = current;
-  lastCpuAt = now;
-  return Math.max(0, Math.min(100, (cpuMs / (elapsedMs * cores)) * 100));
+  sampleLastCpu = current;
+  sampleLastAt = now;
+  const cpu = Math.max(0, Math.min(100, (cpuMs / (elapsedMs * cores)) * 100)),
+    rss = process.memoryUsage().rss;
+  latestSample = { cpu, rss };
+  if (now - lastHistoryAt >= METRICS_STEP_MS) {
+    metricsHistory.push({ t: now, cpu: Math.round(cpu * 10) / 10, rss });
+    lastHistoryAt = now;
+    const cutoff = now - METRICS_KEEP_MS;
+    while (metricsHistory.length && metricsHistory[0].t < cutoff) metricsHistory.shift();
+    if (now - lastMetricsPersist >= METRICS_PERSIST_MS) {
+      db.write("metrics", metricsHistory);
+      lastMetricsPersist = now;
+    }
+  }
+}
+setInterval(sampleMetrics, METRICS_SAMPLE_MS).unref?.();
+// CPU/RAM series for a window (seconds), down-sampled to at most 180 points.
+function metricsSeries(periodSeconds) {
+  const period = Math.max(3600, Math.min(METRICS_KEEP_MS / 1000, Number(periodSeconds) || 86400)) * 1000,
+    now = Date.now(),
+    from = now - period,
+    points = metricsHistory.filter((p) => p.t >= from);
+  const MAX = 180;
+  if (points.length <= MAX) return points;
+  const bucketMs = period / MAX,
+    buckets = new Map();
+  for (const p of points) {
+    const key = Math.floor((p.t - from) / bucketMs),
+      acc = buckets.get(key) || { t: 0, cpu: 0, rss: 0, n: 0 };
+    acc.t += p.t;
+    acc.cpu += p.cpu;
+    acc.rss += p.rss;
+    acc.n += 1;
+    buckets.set(key, acc);
+  }
+  return [...buckets.values()]
+    .map((a) => ({ t: Math.round(a.t / a.n), cpu: a.cpu / a.n, rss: Math.round(a.rss / a.n) }))
+    .sort((x, y) => x.t - y.t);
 }
 // Total profiles across accounts, cached because it needs Nuvio calls and the
 // home page polls frequently.
@@ -176,7 +222,7 @@ async function overview() {
     tmdbConfigured: Boolean(panel.tmdbKey),
     proxyExternal: { configured: Boolean(panel.proxyUrl) },
     memory: { rss: mem.rss, used: totalMem - freeMem, total: totalMem },
-    cpu: { percent: cpuPercent(), cores: os.cpus().length },
+    cpu: { percent: latestSample.cpu, cores: os.cpus().length },
     uptime: process.uptime(),
     bandwidth: addonProxy.metrics(),
   };
@@ -549,6 +595,13 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/overview") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
         return json(res, await overview());
+      }
+      if (route === "/api/metrics/history") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        return json(res, {
+          series: metricsSeries(url.searchParams.get("period")),
+          current: latestSample,
+        });
       }
       if (route === "/api/state")
         return json(res, {
