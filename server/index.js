@@ -14,6 +14,7 @@ import {
   simklHistory,
 } from "./trackers.js";
 import http from "node:http";
+import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -131,6 +132,55 @@ function account(id) {
 const connectionRef = (accountId, profileId) => `${accountId}:${profileId}`;
 const trackerConfig = (service) => panel.trackerApps?.[service] || {};
 const savePanel = () => db.write("panel-settings", panel);
+// Rolling process CPU usage (%). Compares cpuUsage deltas between calls, so the
+// ~5s home-page polling produces a live figure normalized over all cores.
+let lastCpu = process.cpuUsage(),
+  lastCpuAt = Date.now();
+function cpuPercent() {
+  const current = process.cpuUsage(),
+    now = Date.now(),
+    elapsedMs = now - lastCpuAt || 1,
+    cpuMs = (current.user - lastCpu.user + current.system - lastCpu.system) / 1000,
+    cores = os.cpus().length || 1;
+  lastCpu = current;
+  lastCpuAt = now;
+  return Math.max(0, Math.min(100, (cpuMs / (elapsedMs * cores)) * 100));
+}
+// Total profiles across accounts, cached because it needs Nuvio calls and the
+// home page polls frequently.
+let profilesCount = { at: 0, value: 0 };
+async function totalProfiles() {
+  if (Date.now() - profilesCount.at < 60000) return profilesCount.value;
+  let total = 0;
+  for (const a of state.accounts) {
+    try {
+      total += (await profileList(await token(a))).length;
+    } catch {}
+  }
+  profilesCount = { at: Date.now(), value: total };
+  return total;
+}
+async function overview() {
+  const mem = process.memoryUsage(),
+    totalMem = os.totalmem(),
+    freeMem = os.freemem(),
+    connections = Object.values(panel.connections || {});
+  return {
+    accounts: state.accounts.length,
+    profiles: await totalProfiles(),
+    libraryAddons: state.library.length,
+    proxyAddons: state.proxyAddons?.length || 0,
+    trakt: connections.filter((c) => c?.trakt).length,
+    simkl: connections.filter((c) => c?.simkl).length,
+    backups: state.backups.length,
+    tmdbConfigured: Boolean(panel.tmdbKey),
+    proxyExternal: { configured: Boolean(panel.proxyUrl) },
+    memory: { rss: mem.rss, used: totalMem - freeMem, total: totalMem },
+    cpu: { percent: cpuPercent(), cores: os.cpus().length },
+    uptime: process.uptime(),
+    bandwidth: addonProxy.metrics(),
+  };
+}
 async function assertProfile(accountId, profileId) {
   const selected = account(accountId),
     access = await token(selected),
@@ -495,6 +545,10 @@ const server = http.createServer(async (req, res) => {
         statisticsCache.clear();
         savePanel();
         return json(res, { ok: true });
+      }
+      if (route === "/api/overview") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        return json(res, await overview());
       }
       if (route === "/api/state")
         return json(res, {

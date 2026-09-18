@@ -88,6 +88,21 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     state.proxyAddons = [];
     save();
   }
+  if (!state.bandwidth || typeof state.bandwidth !== "object") state.bandwidth = {};
+  state.bandwidth.direct = Number(state.bandwidth.direct) || 0;
+  state.bandwidth.warp = Number(state.bandwidth.warp) || 0;
+  let lastBandwidthSave = 0;
+  // Cumulative bytes relayed, split by upstream (direct = internal, warp = external
+  // proxy). Persisted to the data volume, throttled so streaming does not thrash disk.
+  const countBytes = (mode, bytes) => {
+    if (!bytes || !(mode in state.bandwidth)) return;
+    state.bandwidth[mode] += bytes;
+    if (Date.now() - lastBandwidthSave > 15000) {
+      lastBandwidthSave = Date.now();
+      save();
+    }
+  };
+  const metrics = () => ({ direct: state.bandwidth.direct, warp: state.bandwidth.warp });
 
   const getAddon = (id) => state.proxyAddons.find((addon) => addon.id === id);
 
@@ -201,6 +216,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         } else {
           media.on("error", () => res.destroy());
           req.on("close", () => media.destroy());
+          media.on("data", (chunk) => countBytes(mode, chunk.length));
           media.pipe(res);
         }
         return true;
@@ -231,7 +247,10 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
       );
       res.writeHead(output.status, { "Content-Type": output.contentType });
       if (req.method === "HEAD") res.end();
-      else res.end(output.body);
+      else {
+        countBytes(mode, output.body?.length || 0);
+        res.end(output.body);
+      }
       return true;
     } catch (error) {
       if (!res.headersSent) {
@@ -245,5 +264,5 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     }
   }
 
-  return { handle, register, status, test };
+  return { handle, register, status, test, metrics };
 }

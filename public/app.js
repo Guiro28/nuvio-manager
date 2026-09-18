@@ -25,7 +25,7 @@ const $ = (s) => document.querySelector(s),
         })[c],
     );
 let state,
-  page = "profiles",
+  page = "home",
   accountId = "",
   profileId = 1,
   profiles = [],
@@ -36,8 +36,10 @@ let state,
   settingsSection = { tv: "appearance", mobile: "layout" },
   openSettingGroups = { tv: new Set(), mobile: new Set() },
   historyTab = "progress",
-  pairTimer;
+  pairTimer,
+  homeTimer;
 const labels = {
+  home: "Accueil",
   profiles: "Comptes & profils",
   statistics: "Statistiques",
   library: "Bibliothèque d’addons",
@@ -213,10 +215,12 @@ async function loadProfile() {
 }
 async function render() {
   await refreshState();
+  clearInterval(homeTimer);
   $("#crumb").textContent = labels[page];
   $$("#nav button").forEach((b) =>
     b.classList.toggle("active", b.dataset.page === page),
   );
+  if (page === "home") await renderHome();
   if (page === "profiles") await renderProfiles();
   if (page === "statistics") await renderStatistics($("#content"), { api, run, openDialog });
   if (page === "library") renderLibrary();
@@ -226,6 +230,103 @@ async function render() {
   if (page === "settings") await renderPanelSettings($("#content"), {api,run,toast,onSaved:render});
 }
 const $$ = (s) => [...document.querySelectorAll(s)];
+const fmtBytes = (n) => {
+  n = Number(n) || 0;
+  const units = ["o", "Ko", "Mo", "Go", "To"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
+};
+const fmtUptime = (seconds) => {
+  const s = Math.floor(Number(seconds) || 0),
+    d = Math.floor(s / 86400),
+    h = Math.floor((s % 86400) / 3600),
+    m = Math.floor((s % 3600) / 60);
+  if (d) return `${d} j ${h} h`;
+  if (h) return `${h} h ${m} min`;
+  return `${m} min`;
+};
+const homeMetric = (label, value) =>
+  `<article class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></article>`;
+// Rolling CPU/RAM history, filled by the home-page polling and drawn as a live
+// trend chart. Reset each time the page opens.
+let perfHistory = [];
+function pushPerf(d) {
+  perfHistory.push({ cpu: Math.max(0, Math.min(100, d.cpu.percent || 0)), rss: Number(d.memory.rss) || 0 });
+  if (perfHistory.length > 60) perfHistory.shift();
+}
+function perfChart() {
+  const W = 600, H = 150, padL = 10, padR = 10, padT = 10, padB = 10,
+    plotW = W - padL - padR, plotH = H - padT - padB,
+    hist = perfHistory,
+    n = hist.length,
+    ramMax = Math.max(1, ...hist.map((p) => p.rss)) * 1.15,
+    x = (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * plotW),
+    yCpu = (v) => padT + plotH - (Math.max(0, Math.min(100, v)) / 100) * plotH,
+    yRam = (v) => padT + plotH - (v / ramMax) * plotH,
+    poly = (get, yFn) => hist.map((p, i) => `${x(i).toFixed(1)},${yFn(get(p)).toFixed(1)}`).join(" "),
+    grid = [0, 50, 100]
+      .map((v) => `<line class="perf-grid" vector-effect="non-scaling-stroke" x1="${padL}" y1="${yCpu(v).toFixed(1)}" x2="${W - padR}" y2="${yCpu(v).toFixed(1)}"></line>`)
+      .join(""),
+    lines =
+      n < 2
+        ? ""
+        : `<polyline class="perf-line perf-ram" vector-effect="non-scaling-stroke" points="${poly((p) => p.rss, yRam)}"></polyline><polyline class="perf-line perf-cpu" vector-effect="non-scaling-stroke" points="${poly((p) => p.cpu, yCpu)}"></polyline>`;
+  return `<svg class="perf-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Utilisation CPU et RAM dans le temps">${grid}${lines}</svg>${n < 2 ? '<p class="muted perf-hint">Collecte des données…</p>' : ""}`;
+}
+function homeMarkup(d) {
+  const instance = [
+    homeMetric("Comptes Nuvio", d.accounts),
+    homeMetric("Profils", d.profiles),
+    homeMetric("Addons en bibliothèque", d.libraryAddons),
+    homeMetric("Addons proxifiés", d.proxyAddons),
+    homeMetric("Comptes Trakt", d.trakt),
+    homeMetric("Comptes Simkl", d.simkl),
+    homeMetric("Sauvegardes", d.backups),
+    homeMetric("TMDB", d.tmdbConfigured ? "Configuré" : "Non configuré"),
+  ].join("");
+  const system = [
+    homeMetric("Mémoire du process", fmtBytes(d.memory.rss)),
+    homeMetric("Mémoire système", fmtBytes(d.memory.used)),
+    homeMetric("Processeur", `${Math.round(d.cpu.percent)} %`),
+    homeMetric("Uptime", fmtUptime(d.uptime)),
+  ].join("");
+  const total = (d.bandwidth.direct || 0) + (d.bandwidth.warp || 0);
+  const network = [
+    homeMetric("Trafic interne", fmtBytes(d.bandwidth.direct)),
+    homeMetric("Trafic externe", fmtBytes(d.bandwidth.warp)),
+    homeMetric("Trafic total", fmtBytes(total)),
+    homeMetric("Proxy externe", d.proxyExternal.configured ? "Configuré" : "Désactivé"),
+  ].join("");
+  return `<h2 class="home-heading">Instance</h2><section class="stats-metrics">${instance}</section><h2 class="home-heading">Système</h2><section class="stats-metrics">${system}</section><div class="panel perf-panel"><div class="perf-head"><h3>Utilisation dans le temps</h3><div class="perf-legend"><span><i class="cpu"></i> CPU ${Math.round(d.cpu.percent)} %</span><span><i class="ram"></i> RAM ${esc(fmtBytes(d.memory.rss))}</span></div></div>${perfChart()}</div><h2 class="home-heading">Réseau · proxy</h2><section class="stats-metrics">${network}</section><p class="footer-note">Le trafic est compté depuis le démarrage de l’instance et cumulé dans le volume de données.</p>`;
+}
+async function renderHome() {
+  const c = $("#content");
+  perfHistory = [];
+  c.innerHTML =
+    heading("Accueil", "Vue d’ensemble de l’instance et de son activité.") +
+    '<div id="home-view"><p class="muted">Chargement…</p></div>';
+  const view = $("#home-view");
+  const paint = async () => {
+    let data;
+    try {
+      data = await api("overview");
+    } catch {
+      return;
+    }
+    if (!view.isConnected) return;
+    pushPerf(data);
+    view.innerHTML = homeMarkup(data);
+  };
+  await paint();
+  homeTimer = setInterval(() => {
+    if (!view.isConnected) return clearInterval(homeTimer);
+    paint().catch(() => {});
+  }, 5000);
+}
 function emptyAccounts() {
   return `<div class="empty"><div class="empty-symbol">▦</div><h2>Vos profils, au même endroit.</h2><p class="muted">Connectez un compte Nuvio pour retrouver ses profils, modifier les réglages TV et Mobile et leur attribuer vos addons.</p>${btn("＋ Connecter un compte", "connect", "primary")}<p class="footer-note">La connexion se valide sur le site officiel Nuvio.<br>Votre mot de passe reste sur Nuvio.</p></div>`;
 }
