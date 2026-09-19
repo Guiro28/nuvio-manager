@@ -27,8 +27,9 @@ const sourceLabel = (source) =>
   ({ nuvio: "Nuvio", trakt: "Trakt", simkl: "Simkl" })[source] || source;
 
 let statsResizeHandler = null;
+let statsOutsideHandler = null;
 export async function renderStatistics(container, { api, run, openDialog }) {
-  container.innerHTML = `<div class="title-row"><div><h1>Statistiques</h1><p class="muted">Comparez l’activité et les habitudes de visionnage de tous les profils.</p></div><div class="stats-controls"><div class="stats-profile-filter"><span class="stats-control-label">Profils</span><details id="stats-profile-menu" class="stats-profile-menu"><summary><span id="stats-profile-summary">Tous les profils</span><span class="stats-profile-chevron" aria-hidden="true">⌄</span></summary><div class="stats-profile-popover"><div class="stats-profile-actions"><button type="button" id="stats-select-all">Tout sélectionner</button><button type="button" id="stats-select-none" class="quiet">Tout désélectionner</button></div><div id="stats-profile-list" class="stats-profile-list" role="group" aria-label="Profils à comparer"></div></div></details></div><label>Période<select id="stats-days"><option value="30">30 jours</option><option value="90">90 jours</option><option value="365">1 an</option><option value="0">Tout l’historique</option></select></label><button id="stats-refresh">Actualiser</button></div></div><p id="stats-status" role="status">Chargement des historiques…</p><div id="stats-view"></div>`;
+  container.innerHTML = `<div class="title-row"><div><h1>Statistiques</h1><p class="muted">Comparez l’activité et les habitudes de visionnage de tous les profils.</p></div><div class="stats-controls"><div class="stats-profile-filter"><span class="stats-control-label">Profils</span><details id="stats-profile-menu" class="stats-profile-menu"><summary><span id="stats-profile-summary">Tous les profils</span><span class="stats-profile-chevron" aria-hidden="true">⌄</span></summary><div class="stats-profile-popover"><div class="stats-profile-actions"><button type="button" id="stats-select-all">Tout sélectionner</button><button type="button" id="stats-select-none" class="quiet">Tout désélectionner</button></div><div id="stats-profile-list" class="stats-profile-list" role="group" aria-label="Profils à comparer"></div></div></details></div><label>Période<select id="stats-days"><option value="30">30 jours</option><option value="90">90 jours</option><option value="365">1 an</option><option value="0">Tout l’historique</option><option value="custom">Jours précis…</option></select></label><input type="number" id="stats-days-input" class="stats-days-input" min="1" max="3650" step="1" value="7" hidden aria-label="Nombre de jours"><button id="stats-refresh">Actualiser</button></div></div><p id="stats-status" role="status">Chargement des historiques…</p><div id="stats-view"></div>`;
   const $ = (selector) => container.querySelector(selector);
   const mediaDetails = new Map();
   const profileDetails = new Map();
@@ -60,7 +61,11 @@ export async function renderStatistics(container, { api, run, openDialog }) {
     $("#stats-status").textContent = "Calcul des statistiques…";
     $("#stats-refresh").disabled = true;
     try {
-      const params = new URLSearchParams({ days: $("#stats-days").value });
+      const sel = $("#stats-days").value;
+      const days = sel === "custom"
+        ? Math.max(1, Math.round(Number($("#stats-days-input").value) || 1))
+        : sel;
+      const params = new URLSearchParams({ days });
       const profiles = selectedProfiles();
       const hasProfileOptions = Boolean($("#stats-profile-list").querySelector('input[type="checkbox"]'));
       if (hasProfileOptions) params.set("profiles", profiles.length ? profiles.join(",") : "__none__");
@@ -501,6 +506,10 @@ export async function renderStatistics(container, { api, run, openDialog }) {
         return Number.isNaN(parsed.getTime())
           ? value
           : parsed.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+      },
+      yearOf = (value) => {
+        const parsed = new Date(`${value}T00:00:00`);
+        return Number.isNaN(parsed.getTime()) ? "" : String(parsed.getFullYear());
       };
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
       const value = maxDay * ratio;
@@ -519,11 +528,16 @@ export async function renderStatistics(container, { api, run, openDialog }) {
         x = left + index * step + (step - barWidth) / 2,
         title = `${shortDate(item.date)} · ${total} lecture${total > 1 ? "s" : ""} · ${movies} film${movies > 1 ? "s" : ""} · ${series} épisode${series > 1 ? "s" : ""}`,
         showValue = total && (index === peakIndex || total >= average * 2 || items.length <= 14);
-      return `<g class="timeline-day" data-day="${index}" tabindex="0" role="img" aria-label="${esc(title)}"><rect class="timeline-hit" x="${left + index * step}" y="${baseline - plotHeight}" width="${step}" height="${plotHeight}"></rect>${total ? `${seriesHeight ? `<rect class="timeline-series" x="${x}" y="${baseline - totalHeight}" width="${barWidth}" height="${seriesHeight}" rx="3"></rect>` : ""}${movieHeight ? `<rect class="timeline-movie" x="${x}" y="${baseline - movieHeight}" width="${barWidth}" height="${movieHeight}" rx="3"></rect>` : ""}${showValue ? `<text class="timeline-total" x="${x + barWidth / 2}" y="${Math.max(16, baseline - totalHeight - 7)}">${compact(total)}</text>` : ""}` : `<rect class="timeline-empty" x="${x}" y="${baseline - 2}" width="${barWidth}" height="2" rx="1"></rect>`}${index % labelEvery === 0 || index === items.length - 1 ? `<text class="timeline-date" x="${x + barWidth / 2}" y="${baseline + 21}">${esc(shortDate(item.date))}</text>` : ""}</g>`;
+      return `<g class="timeline-day" data-day="${index}" tabindex="0" role="img" aria-label="${esc(title)}"><rect class="timeline-hit" x="${left + index * step}" y="${baseline - plotHeight}" width="${step}" height="${plotHeight}"></rect>${total ? `${seriesHeight ? `<rect class="timeline-series" x="${x}" y="${baseline - totalHeight}" width="${barWidth}" height="${seriesHeight}" rx="3"></rect>` : ""}${movieHeight ? `<rect class="timeline-movie" x="${x}" y="${baseline - movieHeight}" width="${barWidth}" height="${movieHeight}" rx="3"></rect>` : ""}${showValue ? `<text class="timeline-total" x="${x + barWidth / 2}" y="${Math.max(16, baseline - totalHeight - 7)}">${compact(total)}</text>` : ""}` : `<rect class="timeline-empty" x="${x}" y="${baseline - 2}" width="${barWidth}" height="2" rx="1"></rect>`}${index % labelEvery === 0 || index === items.length - 1 ? `<text class="timeline-date" x="${x + barWidth / 2}" y="${baseline + 21}">${esc(shortDate(item.date))}</text><text class="timeline-year" x="${x + barWidth / 2}" y="${baseline + 33}">${esc(yearOf(item.date))}</text>` : ""}</g>`;
     }).join("");
-    return `<div class="timeline-summary"><div><span>Total de la période</span><strong>${compact(totalPeriod)} lectures</strong></div><div><span>Moyenne quotidienne</span><strong>${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(average)}</strong></div><div><span>Jour le plus actif</span><strong>${peak ? `${shortDate(peak.date)} · ${compact(maxDay)}` : "Aucune activité"}</strong></div></div><div class="timeline-scroll"><svg class="timeline-chart" style="width:${width}px" viewBox="0 0 ${width} 226" role="img" aria-label="Activité quotidienne : films en jaune et épisodes de séries en rouge.">${ticks}<line class="timeline-axis" x1="${left - 4}" y1="${baseline}" x2="${width - 12}" y2="${baseline}"></line>${bars}</svg></div>`;
+    return `<div class="timeline-summary"><div><span>Total de la période</span><strong>${compact(totalPeriod)} lectures</strong></div><div><span>Moyenne quotidienne</span><strong>${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(average)}</strong></div><div><span>Jour le plus actif</span><strong>${peak ? `${shortDate(peak.date)} · ${compact(maxDay)}` : "Aucune activité"}</strong></div></div><div class="timeline-scroll"><svg class="timeline-chart" style="width:${width}px" viewBox="0 0 ${width} 238" role="img" aria-label="Activité quotidienne : films en jaune et épisodes de séries en rouge.">${ticks}<line class="timeline-axis" x1="${left - 4}" y1="${baseline}" x2="${width - 12}" y2="${baseline}"></line>${bars}</svg></div>`;
   };
-  $("#stats-days").onchange = () => run(load);
+  $("#stats-days").onchange = () => {
+    const input = $("#stats-days-input");
+    if (input) input.hidden = $("#stats-days").value !== "custom";
+    run(load);
+  };
+  $("#stats-days-input").oninput = () => run(load);
   $("#stats-profile-list").onchange = (event) => {
     if (!event.target.matches('input[type="checkbox"]')) return;
     updateProfileSummary();
@@ -550,5 +564,13 @@ export async function renderStatistics(container, { api, run, openDialog }) {
     }, 150);
   };
   window.addEventListener("resize", statsResizeHandler);
+  // Close the profile dropdown when clicking anywhere outside of it (native
+  // <details> stays open otherwise), like a real select.
+  if (statsOutsideHandler) document.removeEventListener("pointerdown", statsOutsideHandler);
+  statsOutsideHandler = (event) => {
+    const menu = $("#stats-profile-menu");
+    if (menu?.open && !menu.contains(event.target)) menu.open = false;
+  };
+  document.addEventListener("pointerdown", statsOutsideHandler);
   await load();
 }

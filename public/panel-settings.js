@@ -57,9 +57,20 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       </form>
     </section>
 
+    ${(config.accounts || []).length ? `
     <section class="panel">
-      <h2>Administrateur du panel</h2>
-      <p class="muted">${config.authEnabled ? "Le mot de passe actuel est requis pour modifier les identifiants." : "L’accès local est actuellement sans mot de passe. Définis un mot de passe pour activer la connexion administrateur."}</p>
+      <h2>Administrateurs</h2>
+      <p class="muted">Un compte Nuvio promu administrateur obtient un accès complet au dashboard, sans aucune restriction. Il perd ces droits dès qu’il est retiré. Le compte local reste indépendant : il ne peut être modifié que depuis la connexion locale.</p>
+      <div class="admin-accounts">
+        ${config.accounts.map((account) => `<label class="admin-account-row"><span class="admin-account-id"><strong>${esc(account.name)}</strong>${account.email ? `<small>${esc(account.email)}</small>` : ""}</span><input type="checkbox" data-admin-account="${esc(account.id)}" ${(config.adminAccounts || []).includes(account.id) ? "checked" : ""}></label>`).join("")}
+      </div>
+    </section>` : ""}
+
+    <section class="panel">
+      <h2>Administrateur du panel (compte local)</h2>
+      ${config.isLocalAdmin === false
+        ? '<p class="muted">Ces identifiants ne peuvent être modifiés que depuis la connexion locale (compte administrateur local).</p>'
+        : `<p class="muted">${config.authEnabled ? "Le mot de passe actuel est requis pour modifier les identifiants." : "L’accès local est actuellement sans mot de passe. Définis un mot de passe pour activer la connexion administrateur."}</p>
       <form id="admin-form" class="form">
         <label>Nom d’utilisateur<input name="username" value="${esc(config.username)}" autocomplete="username" maxlength="80" required></label>
         ${config.authEnabled ? '<label>Mot de passe actuel<input name="currentPassword" type="password" autocomplete="current-password" required></label>' : ""}
@@ -67,7 +78,7 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
         <label>Confirmer le nouveau mot de passe<input name="confirmation" type="password" autocomplete="new-password" maxlength="1024"></label>
         <p class="muted">12 caractères minimum. Les autres sessions seront déconnectées après enregistrement.</p>
         <button class="primary">Enregistrer les identifiants</button>
-      </form>
+      </form>`}
     </section>`;
 
   const $ = (selector) => container.querySelector(selector);
@@ -129,19 +140,31 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       await onSaved();
     });
   };
-  $("#admin-form").onsubmit = (event) => {
-    event.preventDefault();
-    const values = new FormData(event.target);
-    run(async () => {
-      if (values.get("newPassword") !== values.get("confirmation"))
-        throw Error("Les deux mots de passe ne correspondent pas.");
-      await api("settings/admin", {
-        username: values.get("username"),
-        currentPassword: values.get("currentPassword") || "",
-        newPassword: values.get("newPassword"),
-      });
-      toast("Identifiants administrateur enregistrés.");
-      await onSaved();
+  container.querySelectorAll("[data-admin-account]").forEach((box) => {
+    box.onchange = () => run(async () => {
+      try {
+        await api("settings/admins", { accountId: box.dataset.adminAccount, admin: box.checked });
+        toast(box.checked ? "Compte promu administrateur." : "Droits administrateur retirés.");
+      } catch (error) {
+        box.checked = !box.checked;
+        throw error;
+      }
     });
-  };
+  });
+  if ($("#admin-form"))
+    $("#admin-form").onsubmit = (event) => {
+      event.preventDefault();
+      const values = new FormData(event.target);
+      run(async () => {
+        if (values.get("newPassword") !== values.get("confirmation"))
+          throw Error("Les deux mots de passe ne correspondent pas.");
+        await api("settings/admin", {
+          username: values.get("username"),
+          currentPassword: values.get("currentPassword") || "",
+          newPassword: values.get("newPassword"),
+        });
+        toast("Identifiants administrateur enregistrés.");
+        await onSaved();
+      });
+    };
 }

@@ -11,7 +11,7 @@ const key = (row) =>
   [row.contentId, row.season ?? "", row.episode ?? ""].join(":");
 
 export function summarizeStatistics(profiles, days = 30, now = Date.now()) {
-  assert([30, 90, 365, 0].includes(days), "Période invalide");
+  assert(Number.isInteger(days) && days >= 0 && days <= 3650, "Période invalide");
   const since = days ? now - days * DAY : 0;
   const summaries = profiles.map((profile) => {
     const events = profile.events.filter((event) => event.at >= since);
@@ -58,7 +58,13 @@ export function summarizeStatistics(profiles, days = 30, now = Date.now()) {
     )
     .sort((a, b) => b.at - a.at);
   const timeline = [];
-  const timelineDays = days ? Math.min(days, 90) : 90;
+  // No fixed cap: honour the requested window, and for "all history" span back to
+  // the earliest event. A 10-year ceiling just guards against stray timestamps.
+  let earliest = now;
+  for (const event of allEvents) if (event.at < earliest) earliest = event.at;
+  const timelineDays = days
+    ? Math.min(days, 3650)
+    : Math.max(1, Math.min(3650, Math.ceil((now - earliest) / DAY) + 1));
   for (let offset = timelineDays - 1; offset >= 0; offset--) {
     const start = new Date(now - offset * DAY);
     start.setHours(0, 0, 0, 0);

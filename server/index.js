@@ -530,11 +530,15 @@ const server = http.createServer(async (req, res) => {
         : await body(req, url.pathname === "/api/backup/restore-file" ? 25_000_000 : 2_000_000);
       const route = url.pathname;
       // Authorization. Admin has full access; a Nuvio viewer is confined to its
-      // own account and cannot reach admin-only routes.
-      const isAdmin = viewer.role === "admin";
+      // own account and cannot reach admin-only routes. A Nuvio account can be
+      // promoted to admin (panel.adminAccounts) and then has no restriction, but
+      // only the local account may edit the local credentials.
+      const isLocalAdmin = viewer.role === "admin";
+      const adminAccountIds = Array.isArray(panel.adminAccounts) ? panel.adminAccounts : [];
+      const isAdmin = isLocalAdmin || (viewer.role === "nuvio" && adminAccountIds.includes(viewer.account));
       const ADMIN_ONLY = new Set([
         "/api/settings", "/api/settings/tmdb", "/api/settings/proxy", "/api/settings/public-url",
-        "/api/settings/proxy/test", "/api/settings/admin", "/api/settings/trackers",
+        "/api/settings/proxy/test", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove",
@@ -574,6 +578,9 @@ const server = http.createServer(async (req, res) => {
           publicUrl: publicOrigin(),
           tmdbConfigured: Boolean(panel.tmdbKey),
           externalProxy,
+          isLocalAdmin,
+          adminAccounts: adminAccountIds,
+          accounts: state.accounts.map(({ id, email, name }) => ({ id, email, name: name || email })),
           trackers: {
             trakt: {
               configured: Boolean(panel.trackerApps?.trakt?.clientId && panel.trackerApps?.trakt?.clientSecret),
@@ -615,8 +622,20 @@ const server = http.createServer(async (req, res) => {
         assert(candidate, "Aucun proxy externe n’est configuré");
         return json(res, await addonProxy.test("warp", candidate));
       }
+      if (route === "/api/settings/admins") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const target = state.accounts.find((a) => a.id === b.accountId);
+        assert(target, "Compte introuvable", 404);
+        const set = new Set(adminAccountIds);
+        if (b.admin) set.add(target.id);
+        else set.delete(target.id);
+        panel.adminAccounts = [...set];
+        savePanel();
+        return json(res, { ok: true, adminAccounts: panel.adminAccounts });
+      }
       if (route === "/api/settings/admin") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(isLocalAdmin, "Seul le compte local peut modifier ses identifiants", 403);
         const ip = req.socket.remoteAddress, active = (attempts.get(ip) || []).filter(t=>Date.now()-t<60000);
         assert(active.length < 10, "Réessaie dans une minute", 429);
         active.push(Date.now()); attempts.set(ip,active);
@@ -661,7 +680,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (route === "/api/state")
         return json(res, {
-          viewer: { role: viewer.role, account: viewer.account },
+          viewer: { role: viewer.role, account: viewer.account, isAdmin },
           accounts: state.accounts
             .filter((a) => isAdmin || a.id === viewer.account)
             .map(({ id, email, name }) => ({ id, email, name: name || email })),
@@ -732,6 +751,8 @@ const server = http.createServer(async (req, res) => {
         const a = account(b.accountId);
         state.accounts = state.accounts.filter((x) => x !== a);
         const prefix = `${a.id}:`;
+        if (Array.isArray(panel.adminAccounts))
+          panel.adminAccounts = panel.adminAccounts.filter((id) => id !== a.id);
         for (const ref of Object.keys(panel.connections || {}))
           if (ref.startsWith(prefix)) delete panel.connections[ref];
         for (const ref of Object.keys(trackerCache.entries || {}))
@@ -765,7 +786,7 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/statistics") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
         const days = Number(url.searchParams.get("days") ?? 30);
-        assert([30, 90, 365, 0].includes(days), "Période invalide");
+        assert(Number.isInteger(days) && days >= 0 && days <= 3650, "Période invalide");
         const requestedProfiles = [...new Set(
           (url.searchParams.get("profiles") || "")
             .split(",")

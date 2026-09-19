@@ -220,12 +220,12 @@ async function render() {
   clearInterval(homeTimer);
   clearInterval(perfTimer);
   document.querySelector(".perf-tip")?.remove();
-  const role = state.viewer?.role || "admin";
+  const isAdmin = state.viewer?.isAdmin === true;
   $$("#nav button").forEach((b) => {
-    const allowed = role === "admin" || NUVIO_PAGES.includes(b.dataset.page);
+    const allowed = isAdmin || NUVIO_PAGES.includes(b.dataset.page);
     b.style.display = allowed ? "" : "none";
   });
-  if (role !== "admin" && !NUVIO_PAGES.includes(page)) page = "profiles";
+  if (!isAdmin && !NUVIO_PAGES.includes(page)) page = "profiles";
   $("#crumb").textContent = labels[page];
   $$("#nav button").forEach((b) =>
     b.classList.toggle("active", b.dataset.page === page),
@@ -264,6 +264,8 @@ const homeMetric = (label, value) =>
 // Latest fetched series + window, kept for the hover interaction.
 let perfSeries = [];
 let perfPeriodSec = 86400;
+// Previous cumulative bandwidth sample, to derive a live throughput.
+let lastBw = null;
 // Draws a CPU/RAM time series on a real time axis, with a % grid (labels on the
 // left). RAM shares the plot, auto-scaled; its value shows in the hover tooltip.
 function perfChart(series, periodSeconds) {
@@ -340,10 +342,17 @@ function updateHomeTiles(d) {
     homeMetric("Processeur", `${Math.round(d.cpu.percent)} %`),
     homeMetric("Uptime", fmtUptime(d.uptime)),
   ].join("");
+  const total = (d.bandwidth.direct || 0) + (d.bandwidth.warp || 0);
+  const now = Date.now();
+  let rate = null;
+  if (lastBw && now > lastBw.t && total >= lastBw.total)
+    rate = (total - lastBw.total) / ((now - lastBw.t) / 1000);
+  lastBw = { total, t: now };
   const network = [
+    homeMetric("Débit en direct", rate == null ? "—" : `${fmtBytes(rate)}/s`),
     homeMetric("Proxy interne", fmtBytes(d.bandwidth.direct)),
     homeMetric("Proxy externe", fmtBytes(d.bandwidth.warp)),
-    homeMetric("Trafic total", fmtBytes((d.bandwidth.direct || 0) + (d.bandwidth.warp || 0))),
+    homeMetric("Trafic total", fmtBytes(total)),
   ].join("");
   const instance = [
     homeMetric("Comptes Nuvio", d.accounts),
@@ -364,6 +373,7 @@ function updateHomeTiles(d) {
 }
 async function renderHome() {
   const c = $("#content");
+  lastBw = null;
   c.innerHTML = heading("Accueil", "Vue d’ensemble de l’instance et de son activité.") + homeSkeleton();
   const loadTiles = async () => {
     let data;
@@ -409,7 +419,7 @@ function profileAvatar(profile) {
 }
 async function renderProfiles() {
   const c = $("#content");
-  const admin = state.viewer?.role !== "nuvio";
+  const admin = state.viewer?.isAdmin === true;
   c.innerHTML = heading(
     "Comptes & profils",
     "Un espace pour chaque compte. Des réglages pour chaque écran.",
