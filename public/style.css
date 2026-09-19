@@ -646,6 +646,17 @@ header {
 .auth-admin[open] summary {
   margin-bottom: 10px;
 }
+#nuvio-login button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+.btn-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
 dialog {
   background: var(--surface);
   color: var(--ink);

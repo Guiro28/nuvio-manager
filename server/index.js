@@ -1245,6 +1245,7 @@ const server = http.createServer(async (req, res) => {
       "/simkl.webp": "simkl.webp",
       "/assets/nuvio-manager-logo.png": "assets/nuvio-manager-logo.png",
       "/assets/nuvio_login.webp": "assets/nuvio_login.webp",
+      "/assets/nuvio_logo.png": "assets/nuvio_logo.png",
       "/assets/favicon.png": "assets/favicon.png",
       "/style.css": "style.css",
       "/aurora.css": "aurora.css",

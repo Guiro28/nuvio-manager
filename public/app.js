@@ -1388,9 +1388,9 @@ function login() {
   host.className = "auth-screen";
   host.innerHTML =
     `<div class="auth-card"><div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="64" height="64"><div><h2>Nuvio Manager</h2><p class="muted">Connectez-vous à votre dashboard.</p></div></div>` +
-    `<form id="nuvio-login" class="form"><label>Email Nuvio<input name="email" type="email" autocomplete="username" placeholder="vous@exemple.com" required></label><label>Mot de passe Nuvio<input name="password" type="password" autocomplete="current-password" required></label><button class="primary">Se connecter avec Nuvio</button><p id="nuvio-error" class="error" hidden></p></form>` +
+    `<form id="nuvio-login" class="form"><label>Email Nuvio<input name="email" type="email" autocomplete="username" placeholder="vous@exemple.com" required></label><label>Mot de passe Nuvio<input name="password" type="password" autocomplete="current-password" required></label><button class="primary"><img class="btn-logo" src="/assets/nuvio_logo.png" alt="">Se connecter avec Nuvio</button><p id="nuvio-error" class="error" hidden></p></form>` +
     `<div class="auth-sep"><span>ou</span></div>` +
-    `<details class="auth-admin"><summary>Connexion administrateur</summary><form id="admin-login" class="form"><label>Utilisateur<input name="user" autocomplete="username" required></label><label>Mot de passe<input name="password" type="password" autocomplete="current-password" required></label><button>Espace admin</button><p id="admin-error" class="error" hidden></p></form></details></div>`;
+    `<details class="auth-admin"><summary>Connexion local</summary><form id="admin-login" class="form"><label>Utilisateur<input name="user" autocomplete="username" required></label><label>Mot de passe<input name="password" type="password" autocomplete="current-password" required></label><button>Se connecter</button><p id="admin-error" class="error" hidden></p></form></details></div>`;
   document.body.appendChild(host);
   const done = async () => { host.remove(); await render(); };
   const bind = (formId, route, errId) => {
