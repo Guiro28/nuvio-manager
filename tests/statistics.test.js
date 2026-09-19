@@ -45,10 +45,16 @@ test("statistics compare profiles, sources, activity and shared titles", () => {
   assert.deepEqual(result.sources.map((row) => row.source).sort(), ["nuvio", "simkl", "trakt"]);
 });
 
-test("statistics period excludes older events and rejects arbitrary ranges", () => {
+test("statistics period excludes older events, accepts custom ranges and rejects invalid ones", () => {
   const now = Date.UTC(2026, 8, 14);
   const profile = { ref: "a:1", accountName: "A", profileName: "P", sources: ["nuvio"], events: [{ source: "nuvio", contentId: "old", kind: "movie", at: now - 31 * 86400000 }], progress: [] };
   assert.equal(summarizeStatistics([profile], 30, now).totals.plays, 0);
   assert.equal(summarizeStatistics([profile], 0, now).totals.plays, 1);
-  assert.throws(() => summarizeStatistics([], 7, now), /Période invalide/);
+  // A custom day count is now valid; the 31-day-old event stays out of a 7-day window.
+  assert.equal(summarizeStatistics([profile], 7, now).totals.plays, 0);
+  assert.equal(summarizeStatistics([profile], 45, now).totals.plays, 1);
+  // Non-integer, negative and out-of-range windows are still rejected.
+  assert.throws(() => summarizeStatistics([], 1.5, now), /Période invalide/);
+  assert.throws(() => summarizeStatistics([], -1, now), /Période invalide/);
+  assert.throws(() => summarizeStatistics([], 5000, now), /Période invalide/);
 });
