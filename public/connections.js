@@ -9,7 +9,18 @@ const formatDate = (value) => value ? new Date(value).toLocaleString("fr-FR") : 
 export async function renderConnections(container, context) {
   const { api, accountId, profileId, openDialog, run, toast, onConnected } = context;
   const data = await api(`connections?${new URLSearchParams({ accountId, profileId })}`);
-  container.innerHTML = `<h2>Services de suivi</h2><p class="muted">Associez un compte de suivi à ce profil. Les statistiques combinent ensuite les historiques sans modifier les données d’origine.</p><div class="connection-grid">${["trakt", "simkl"].map((service) => card(service, data)).join("")}</div><p class="footer-note">Les connexions sont propres à ce profil. Les jetons d’accès restent chiffrés sur le serveur.</p>`;
+  container.innerHTML = `<h2>Sources de suivi</h2><p class="muted">Associez un compte de suivi à ce profil. Les statistiques combinent ensuite les historiques sans modifier les données d’origine.</p><div class="connection-grid">${["trakt", "simkl"].map((service) => card(service, data)).join("")}${nuvioSourceCard(data)}</div><p class="footer-note">Les connexions sont propres à ce profil. Les jetons d’accès restent chiffrés sur le serveur.</p>`;
+  const nuvioToggle = container.querySelector("#stats-nuvio-toggle");
+  if (nuvioToggle) nuvioToggle.onchange = () => run(async () => {
+    const disabled = !nuvioToggle.checked;
+    try {
+      await api("connections/stats-source", { accountId, profileId, disabled });
+      toast(disabled ? "Historique Nuvio exclu des statistiques de ce profil." : "Historique Nuvio inclus dans les statistiques de ce profil.");
+    } catch (error) {
+      nuvioToggle.checked = !nuvioToggle.checked;
+      throw error;
+    }
+  });
   container.querySelectorAll("[data-connect]").forEach((button) => {
     button.onclick = () => run(() => connect(button.dataset.connect));
   });
@@ -94,6 +105,11 @@ export async function renderConnections(container, context) {
     };
     timer = setTimeout(poll, interval);
   }
+}
+
+function nuvioSourceCard(data) {
+  const included = !data.statsNuvioDisabled;
+  return `<article class="panel connection-card stats-source-card"><img class="connection-logo" src="/assets/nuvio_logo.png" alt="Logo Nuvio"><div><h3>Historique Nuvio</h3><p class="muted">Par défaut, l’historique de lecture Nuvio alimente les statistiques avec Trakt et Simkl. Désactive-le pour ne compter que Trakt et Simkl sur ce profil.</p><label class="stats-source-toggle"><input type="checkbox" id="stats-nuvio-toggle"${included ? " checked" : ""}><span>Inclure l’historique Nuvio</span></label></div></article>`;
 }
 
 function card(service, data) {

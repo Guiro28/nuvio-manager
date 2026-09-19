@@ -1687,12 +1687,16 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 @media(max-width:750px){.timeline-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.stats-metrics{grid-template-columns:1fr}.timeline-legend{width:100%;margin-top:8px}.timeline-summary{grid-template-columns:1fr}.recent-row{grid-template-columns:52px minmax(0,1fr)}.recent-row>img,.recent-poster{width:52px}.recent-row time{grid-column:2;text-align:left}.stats-detail-content{grid-template-columns:92px minmax(0,1fr);gap:14px}.stats-detail-visual{width:92px}.stats-detail-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.stats-profile-recent>div{grid-template-columns:1fr}.stats-detail-modal{margin:-20px;padding:20px}.stats-recent-filters button{padding:6px 9px}.stats-recent-arrows{margin-left:0}}
 
-.connection-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
+.connection-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;}
 .connection-card {display:grid;grid-template-columns:52px minmax(0,1fr);gap:15px;margin:0;}
 .connection-card h3 {margin:2px 0 8px;}
 .connection-logo {width:52px;height:52px;border-radius:13px;display:block;object-fit:cover;background:var(--button);border:1px solid var(--border);}
+.stats-source-card .connection-logo {object-fit:contain;padding:7px;}
+.stats-source-toggle {display:flex;align-items:center;gap:9px;margin-top:10px;cursor:pointer;font-size:.92rem;}
+.stats-source-toggle input {width:18px;height:18px;accent-color:var(--accent);flex:none;}
 .connection-ok {color:#4ecb71;font-weight:650;}
-@media(max-width:650px){.connection-grid{grid-template-columns:1fr}}
+@media(max-width:900px){.connection-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.connection-grid{grid-template-columns:1fr}}
 
 .identity-customization {display:grid;grid-template-columns:150px minmax(0,1fr);gap:24px;align-items:center;}
 .identity-avatar-preview {position:relative;width:150px;height:150px;border-radius:50%;display:grid;place-items:center;overflow:hidden;border:2px solid var(--border-strong);box-shadow:0 12px 30px rgba(0,0,0,.25);color:#fff;font-size:3rem;font-weight:700;}

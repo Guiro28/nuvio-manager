@@ -755,6 +755,8 @@ const server = http.createServer(async (req, res) => {
           panel.adminAccounts = panel.adminAccounts.filter((id) => id !== a.id);
         for (const ref of Object.keys(panel.connections || {}))
           if (ref.startsWith(prefix)) delete panel.connections[ref];
+        for (const ref of Object.keys(panel.statsNuvioDisabled || {}))
+          if (ref.startsWith(prefix)) delete panel.statsNuvioDisabled[ref];
         for (const ref of Object.keys(trackerCache.entries || {}))
           if (ref.startsWith(prefix)) delete trackerCache.entries[ref];
         save();
@@ -804,6 +806,14 @@ const server = http.createServer(async (req, res) => {
           externalHistory,
           getProfiles: profileList,
         });
+        // Profiles that opted out of their Nuvio history keep only Trakt/Simkl.
+        const nuvioDisabled = panel.statsNuvioDisabled || {};
+        for (const profile of dataset) {
+          if (!nuvioDisabled[profile.ref]) continue;
+          profile.events = profile.events.filter((event) => event.source !== "nuvio");
+          profile.progress = [];
+          profile.sources = profile.sources.filter((source) => source !== "nuvio");
+        }
         const availableProfiles = dataset.map((profile) => ({
           ref: profile.ref,
           accountName: profile.accountName,
@@ -876,7 +886,19 @@ const server = http.createServer(async (req, res) => {
             lastSync: rows[service].lastSync || null,
             lastError: rows[service].lastError || "",
           } : { connected: false }])),
+          statsNuvioDisabled: Boolean(panel.statsNuvioDisabled?.[connectionRef(selectedAccount, selectedProfile)]),
         });
+      }
+      if (route === "/api/connections/stats-source") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        await assertProfile(b.accountId, Number(b.profileId));
+        const ref = connectionRef(b.accountId, Number(b.profileId));
+        panel.statsNuvioDisabled ??= {};
+        if (b.disabled) panel.statsNuvioDisabled[ref] = true;
+        else delete panel.statsNuvioDisabled[ref];
+        savePanel();
+        statisticsCache.clear();
+        return json(res, { ok: true, disabled: Boolean(b.disabled) });
       }
       if (route === "/api/connections/start") {
         assert(req.method === "POST", "Méthode non autorisée", 405);

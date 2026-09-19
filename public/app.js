@@ -517,7 +517,7 @@ function renderEditor() {
     ["addons", "Addons"],
     ["plugins", "Plugins"],
     ["identity", "Profil"],
-    ["connections", "Trakt & Simkl"],
+    ["connections", "Sources de suivi"],
     ["history", "Historique Nuvio"],
   ]
     .map(
