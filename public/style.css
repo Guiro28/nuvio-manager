@@ -511,10 +511,12 @@ header {
 }
 .list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   margin-top: 20px;
 }
 .addon {
+  min-width: 0;
   padding: 20px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -598,6 +600,51 @@ header {
   padding: 25px;
   color: var(--muted);
   text-align: center;
+}
+.auth-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background: var(--page);
+}
+.auth-card {
+  width: min(420px, 100%);
+  padding: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.45);
+}
+.auth-card .login-brand {
+  margin-bottom: 22px;
+}
+.auth-sep {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.auth-sep::before,
+.auth-sep::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.auth-admin summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 6px 0;
+}
+.auth-admin[open] summary {
+  margin-bottom: 10px;
 }
 dialog {
   background: var(--surface);
@@ -1153,6 +1200,10 @@ hr {
   .addon-top {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .library-addon-identity {
+    flex: 0 0 auto;
+    width: 100%;
   }
 
   .addon-logo {

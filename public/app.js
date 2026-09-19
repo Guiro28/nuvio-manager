@@ -214,10 +214,18 @@ async function loadProfile() {
   );
   draft = structuredClone(current[tab]?.settings_json || {});
 }
+const NUVIO_PAGES = ["profiles", "statistics", "proxy"];
 async function render() {
   await refreshState();
   clearInterval(homeTimer);
   clearInterval(perfTimer);
+  document.querySelector(".perf-tip")?.remove();
+  const role = state.viewer?.role || "admin";
+  $$("#nav button").forEach((b) => {
+    const allowed = role === "admin" || NUVIO_PAGES.includes(b.dataset.page);
+    b.style.display = allowed ? "" : "none";
+  });
+  if (role !== "admin" && !NUVIO_PAGES.includes(page)) page = "profiles";
   $("#crumb").textContent = labels[page];
   $$("#nav button").forEach((b) =>
     b.classList.toggle("active", b.dataset.page === page),
@@ -287,9 +295,9 @@ function bindPerfHover() {
   if (!tip) {
     tip = document.createElement("div");
     tip.className = "perf-tip";
-    tip.hidden = true;
     document.body.appendChild(tip);
   }
+  tip.hidden = true;
   const tEnd = Date.now(),
     tStart = tEnd - perfPeriodSec * 1000,
     span = Math.max(1, tEnd - tStart);
@@ -401,21 +409,23 @@ function profileAvatar(profile) {
 }
 async function renderProfiles() {
   const c = $("#content");
+  const admin = state.viewer?.role !== "nuvio";
   c.innerHTML = heading(
     "Comptes & profils",
     "Un espace pour chaque compte. Des réglages pour chaque écran.",
-    btn("＋ Connecter un compte", "connect", "primary"),
+    admin ? btn("＋ Connecter un compte", "connect", "primary") : "",
   );
-  $("#connect").onclick = () => run(pair);
+  const connectBtn = $("#connect");
+  if (connectBtn) connectBtn.onclick = () => run(pair);
   if (!accountId) {
     c.innerHTML = heading('Comptes & profils', 'Un espace pour chaque compte. Des réglages pour chaque écran.') + emptyAccounts();
-    $("#connect").onclick = () => run(pair);
     $$("#connect").forEach((b) => (b.onclick = () => run(pair)));
     return;
   }
   await loadProfiles();
-  c.innerHTML += `<div class="account-bar"><label>COMPTE NUVIO<select id="account">${accountOptions()}</select></label><div class="actions"><span class="badge neutral">${profiles.length} profils</span>${btn("Renommer le compte", "rename-account")}${btn("＋ Nouveau profil", "create")}${btn("Déconnecter ce compte", "disconnect", "quiet")}</div></div><div class="profile-grid">${profiles.map((p) => `<button class="profile-card ${p.profile_index === Number(profileId) ? "selected" : ""}" data-profile="${p.profile_index}">${profileAvatar(p)}<span class="profile-name">${esc(p.name)}</span><span class="muted">${p.profile_index === 1 ? "Profil principal" : "Profil " + p.profile_index} · TV & Mobile</span></button>`).join("")}</div><div id="editor"></div>`;
-  $("#connect").onclick = () => run(pair);
+  c.innerHTML += `<div class="account-bar"><label>COMPTE NUVIO<select id="account">${accountOptions()}</select></label><div class="actions"><span class="badge neutral">${profiles.length} profils</span>${admin ? btn("Renommer le compte", "rename-account") : ""}${btn("＋ Nouveau profil", "create")}${admin ? btn("Déconnecter ce compte", "disconnect", "quiet") : ""}</div></div><div class="profile-grid">${profiles.map((p) => `<button class="profile-card ${p.profile_index === Number(profileId) ? "selected" : ""}" data-profile="${p.profile_index}">${profileAvatar(p)}<span class="profile-name">${esc(p.name)}</span><span class="muted">${p.profile_index === 1 ? "Profil principal" : "Profil " + p.profile_index} · TV & Mobile</span></button>`).join("")}</div><div id="editor"></div>`;
+  const connectAgain = $("#connect");
+  if (connectAgain) connectAgain.onclick = () => run(pair);
   $$(".profile-avatar").forEach(image => image.addEventListener('error', () => image.remove(), {once:true}));
   $("#account").onchange = (e) =>
     run(async () => {
@@ -431,8 +441,10 @@ async function renderProfiles() {
         })),
   );
   $("#create").onclick = createProfile;
-  $("#rename-account").onclick = renameAccount;
-  $("#disconnect").onclick = () => {
+  const renameBtn = $("#rename-account");
+  if (renameBtn) renameBtn.onclick = renameAccount;
+  const disconnectBtn = $("#disconnect");
+  if (disconnectBtn) disconnectBtn.onclick = () => {
     openDialog(
       `<h2>Déconnecter ce compte du dashboard ?</h2><p>Le compte et ses profils restent disponibles dans Nuvio.</p><div class="dialog-actions"><button data-close>Annuler</button><button id="remove-account" class="danger">Déconnecter</button></div>`,
     );
@@ -1371,20 +1383,32 @@ async function pair() {
   );
 }
 function login() {
-  openDialog(
-    `<div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="76" height="76"><div><h2>Nuvio Manager</h2><p class="muted">Connectez-vous à votre dashboard privé.</p></div></div><form id="login-form" class="form"><label>Utilisateur<input name="user" autocomplete="username" placeholder="Nom d’utilisateur" required></label><label>Mot de passe du dashboard<input name="password" type="password" autocomplete="current-password" required></label><button class="primary">Se connecter</button><p id="login-error" class="error" hidden></p></form>`,
-  );
-  $("#login-form").onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      await api("login", Object.fromEntries(new FormData(e.target)));
-      $("#dialog").close();
-      await render();
-    } catch (err) {
-      $("#login-error").hidden = false;
-      $("#login-error").textContent = err.message;
-    }
+  if (document.querySelector(".auth-screen")) return;
+  const host = document.createElement("div");
+  host.className = "auth-screen";
+  host.innerHTML =
+    `<div class="auth-card"><div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="64" height="64"><div><h2>Nuvio Manager</h2><p class="muted">Connectez-vous à votre dashboard.</p></div></div>` +
+    `<form id="nuvio-login" class="form"><label>Email Nuvio<input name="email" type="email" autocomplete="username" placeholder="vous@exemple.com" required></label><label>Mot de passe Nuvio<input name="password" type="password" autocomplete="current-password" required></label><button class="primary">Se connecter avec Nuvio</button><p id="nuvio-error" class="error" hidden></p></form>` +
+    `<div class="auth-sep"><span>ou</span></div>` +
+    `<details class="auth-admin"><summary>Connexion administrateur</summary><form id="admin-login" class="form"><label>Utilisateur<input name="user" autocomplete="username" required></label><label>Mot de passe<input name="password" type="password" autocomplete="current-password" required></label><button>Espace admin</button><p id="admin-error" class="error" hidden></p></form></details></div>`;
+  document.body.appendChild(host);
+  const done = async () => { host.remove(); await render(); };
+  const bind = (formId, route, errId) => {
+    host.querySelector(`#${formId}`).onsubmit = async (event) => {
+      event.preventDefault();
+      const err = host.querySelector(`#${errId}`);
+      err.hidden = true;
+      try {
+        await api(route, Object.fromEntries(new FormData(event.target)));
+        await done();
+      } catch (error) {
+        err.hidden = false;
+        err.textContent = error.message;
+      }
+    };
   };
+  bind("nuvio-login", "login/nuvio", "nuvio-error");
+  bind("admin-login", "login", "admin-error");
 }
 function setup(publicUrlOnly = false) {
   openDialog(

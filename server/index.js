@@ -39,12 +39,14 @@ const state = db.read("state", { accounts: [], library: [], backups: [] });
 const save = () => db.write("state", state);
 const panel = db.read("panel-settings", {});
 const storedSessions = db.read("sessions", { version: 1, entries: {} });
+// Session value: { exp, role: "admin"|"nuvio", account: accountId|null }.
+// Old numeric-only entries (previous format) are dropped, forcing a re-login.
 const sessions = new Map(
   Object.entries(storedSessions.entries || {}).filter(
-    ([sid, expires]) =>
+    ([sid, s]) =>
       /^[a-f0-9]{64}$/.test(sid) &&
-      Number.isFinite(expires) &&
-      expires > Date.now(),
+      s && typeof s === "object" &&
+      Number.isFinite(s.exp) && s.exp > Date.now(),
   ),
 );
 const tmdbCache = db.read("tmdb-cache", { version: 1, entries: {}, genres: {} });
@@ -86,9 +88,9 @@ const saveSessions = () =>
     version: 1,
     entries: Object.fromEntries(sessions),
   });
-const issueSession = (res) => {
+const issueSession = (res, role = "admin", account = null) => {
   const sid = crypto.randomBytes(32).toString("hex");
-  sessions.set(sid, Date.now() + 8 * 3600 * 1000);
+  sessions.set(sid, { exp: Date.now() + 8 * 3600 * 1000, role, account });
   saveSessions();
   res.setHeader(
     "Set-Cookie",
@@ -476,23 +478,77 @@ const server = http.createServer(async (req, res) => {
           "Identifiants incorrects",
           401,
         );
-        issueSession(res);
+        issueSession(res, "admin");
+        return json(res, { ok: true });
+      }
+      if (url.pathname === "/api/login/nuvio") {
+        assert(!setupRequired(), "Configuration initiale requise", 428);
+        const b = await body(req),
+          ip = req.socket.remoteAddress,
+          recent = (attempts.get(ip) || []).filter((t) => Date.now() - t < 60000);
+        assert(recent.length < 10, "Réessaie dans une minute", 429);
+        recent.push(Date.now());
+        attempts.set(ip, recent);
+        const email = String(b.email || "").trim(),
+          password = String(b.password || "");
+        assert(email && password, "Email et mot de passe requis", 400);
+        let data;
+        try {
+          data = await call("/auth/v1/token?grant_type=password", { email, password });
+        } catch {
+          throw Object.assign(new Error("Identifiants Nuvio incorrects"), { status: 401 });
+        }
+        const uid = data?.user?.id;
+        const acc = state.accounts.find(
+          (a) => (uid && a.id === uid) || (a.email && a.email.toLowerCase() === email.toLowerCase()),
+        );
+        assert(acc, "Ce compte Nuvio n’a pas accès à ce dashboard. Demande à l’administrateur de l’ajouter.", 403);
+        if (data.access_token) {
+          acc.access = data.access_token;
+          acc.refresh = data.refresh_token || acc.refresh;
+          acc.expires = Date.now() + (Number(data.expires_in) || 3600) * 1000;
+          save();
+        }
+        issueSession(res, "nuvio", acc.id);
         return json(res, { ok: true });
       }
       const sid = req.headers.cookie?.match(
         /(?:^|; )nm_session=([a-f0-9]+)/,
       )?.[1];
-      const sessionExpiry = sessions.get(sid);
-      if (sessionExpiry && sessionExpiry <= Date.now()) {
+      const session = sessions.get(sid);
+      if (session && session.exp <= Date.now()) {
         sessions.delete(sid);
         saveSessions();
       }
       assert(!setupRequired(), "Configuration initiale requise", 428);
-      assert(authEnabled() && sessionExpiry > Date.now(), "Connexion au dashboard requise", 401);
+      assert(authEnabled() && session && session.exp > Date.now(), "Connexion au dashboard requise", 401);
+      const viewer = session.role === "nuvio"
+        ? { role: "nuvio", account: session.account }
+        : { role: "admin", account: null };
       const b = req.method === "GET"
         ? {}
         : await body(req, url.pathname === "/api/backup/restore-file" ? 25_000_000 : 2_000_000);
       const route = url.pathname;
+      // Authorization. Admin has full access; a Nuvio viewer is confined to its
+      // own account and cannot reach admin-only routes.
+      const isAdmin = viewer.role === "admin";
+      const ADMIN_ONLY = new Set([
+        "/api/settings", "/api/settings/tmdb", "/api/settings/proxy", "/api/settings/public-url",
+        "/api/settings/proxy/test", "/api/settings/admin", "/api/settings/trackers",
+        "/api/overview", "/api/metrics/history",
+        "/api/pair/start", "/api/pair/poll",
+        "/api/accounts/rename", "/api/accounts/remove",
+        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove",
+        "/api/backup/create", "/api/backup/delete", "/api/backup/restore",
+        "/api/backup/restore-file", "/api/backup/download",
+      ]);
+      if (ADMIN_ONLY.has(route)) assert(isAdmin, "Accès réservé à l’administrateur", 403);
+      if (!isAdmin) {
+        const refAccount = b?.accountId ?? url.searchParams.get("accountId");
+        if (refAccount != null && refAccount !== "") assert(refAccount === viewer.account, "Accès refusé à ce compte", 403);
+        if (b?.source?.accountId) assert(b.source.accountId === viewer.account, "Accès refusé", 403);
+        assert(!b?.assignment, "Accès réservé à l’administrateur", 403);
+      }
       if (route === "/api/settings") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
         let externalProxy;
@@ -605,9 +661,12 @@ const server = http.createServer(async (req, res) => {
       }
       if (route === "/api/state")
         return json(res, {
-          accounts: state.accounts.map(({ id, email, name }) => ({ id, email, name: name || email })),
-          library: state.library,
-          backups: state.backups,
+          viewer: { role: viewer.role, account: viewer.account },
+          accounts: state.accounts
+            .filter((a) => isAdmin || a.id === viewer.account)
+            .map(({ id, email, name }) => ({ id, email, name: name || email })),
+          library: isAdmin ? state.library : [],
+          backups: isAdmin ? state.backups : [],
           backend,
         });
       if (route === "/api/logout") {
@@ -713,11 +772,12 @@ const server = http.createServer(async (req, res) => {
             .map((value) => value.trim())
             .filter(Boolean),
         )].sort();
-        const cacheKey = `stats-v5:${days}:${requestedProfiles.join(",")}`;
+        const statsAccounts = isAdmin ? state.accounts : state.accounts.filter((a) => a.id === viewer.account);
+        const cacheKey = `stats-v5:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
         const cached = statisticsCache.get(cacheKey);
         if (!url.searchParams.has("refresh") && cached?.expiresAt > Date.now())
           return json(res, cached.value);
-        const dataset = await collectNuvioStatistics(state.accounts, {
+        const dataset = await collectNuvioStatistics(statsAccounts, {
           getToken: token,
           rpc,
           externalHistory,
@@ -1062,6 +1122,7 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/apply") {
         const p = plans.get(b.id);
         assert(p && p.expires > Date.now(), "Aperçu expiré");
+        assert(isAdmin || p.accountId === viewer.account, "Accès refusé", 403);
         const key = p.accountId + ":" + p.profileId;
         assert(!locks.has(key), "Une écriture est en cours", 409);
         locks.add(key);
