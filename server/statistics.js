@@ -194,26 +194,37 @@ export async function collectNuvioStatistics(accounts, { getToken, rpc, external
   const profiles = [];
   for (const account of accounts) {
     const access = await getToken(account);
+    const providerId = account.provider;
+    const historySource = providerId === "tuvora" ? "tuvora" : "nuvio";
     const identities = getProfiles
-      ? await getProfiles(access)
-      : await rpc("sync_pull_profiles", {}, access);
+      ? await getProfiles(access, providerId)
+      : await rpc("sync_pull_profiles", {}, access, providerId);
     for (const identity of identities) {
       const profileId = identity.profile_index;
+      // Tuvora restricts the paginated sync_pull_* RPCs on these tables; its
+      // own app reads them via sync_get_all_* (same row shape), so use those.
+      const isTuvora = providerId === "tuvora";
       const [watched, progress, external] = await Promise.all([
-        rpc(
-          "sync_pull_watched_items",
-          { p_profile_id: profileId, p_page: 1, p_page_size: 5000 },
-          access,
-        ),
-        rpc(
-          "sync_pull_watch_progress",
-          { p_profile_id: profileId, p_since_last_watched: null, p_limit: 5000 },
-          access,
-        ),
+        isTuvora
+          ? rpc("sync_get_all_watched_items", { p_profile_id: profileId }, access, providerId)
+          : rpc(
+              "sync_pull_watched_items",
+              { p_profile_id: profileId, p_page: 1, p_page_size: 5000 },
+              access,
+              providerId,
+            ),
+        isTuvora
+          ? rpc("sync_get_all_watch_progress", { p_profile_id: profileId }, access, providerId)
+          : rpc(
+              "sync_pull_watch_progress",
+              { p_profile_id: profileId, p_since_last_watched: null, p_limit: 5000 },
+              access,
+              providerId,
+            ),
         externalHistory ? externalHistory(account.id, profileId) : [],
       ]);
       const events = watched.map((row) => ({
-        source: "nuvio",
+        source: historySource,
         contentId: String(row.content_id),
         title: String(row.title || ""),
         kind: row.episode == null ? "movie" : "episode",
@@ -227,7 +238,7 @@ export async function collectNuvioStatistics(accounts, { getToken, rpc, external
         accountName: account.name || account.email,
         profileName: identity.name || `Profil ${profileId}`,
         avatarUrl: identity.avatar_image_url || identity.avatar_url || null,
-        sources: [...new Set(["nuvio", ...(external || []).map((row) => row.source)])],
+        sources: [...new Set([historySource, ...(external || []).map((row) => row.source)])],
         events,
         progress: progress.map((row) => ({
           contentId: String(row.content_id),

@@ -1,4 +1,5 @@
 import { schema } from "./settings-schema.js";
+import { t } from "./i18n.js";
 
 const blueprints = {
   tv: [
@@ -139,7 +140,10 @@ const descriptions = {
   "meta_screen_settings_payload.background_mode": "Choisir comment les visuels apparaissent derrière les pages de métadonnées.",
 };
 
-export const settingDescription = (meta) => meta?.description || descriptions[`${meta?.feature}.${meta?.key}`] || "";
+export const settingDescription = (meta) => {
+  const value = meta?.description || descriptions[`${meta?.feature}.${meta?.key}`] || "";
+  return value ? t(value) : "";
+};
 
 const optionDescriptions = {
   "theme_settings.settings_ui_style.CLASSIC": "Disposition standard avec des cartes.",
@@ -157,8 +161,10 @@ const optionDescriptions = {
   "meta_screen_settings_payload.background_mode.dominant_color": "Adapter l’arrière-plan de la page à la couleur principale du fond.",
 };
 
-export const settingOptionDescription = (meta, option) =>
-  optionDescriptions[`${meta?.feature}.${meta?.key}.${option?.value}`] || "";
+export const settingOptionDescription = (meta, option) => {
+  const value = optionDescriptions[`${meta?.feature}.${meta?.key}.${option?.value}`] || "";
+  return value ? t(value) : "";
+};
 
 const get = (values, feature, key) => values.get(`${feature}.${key}`);
 

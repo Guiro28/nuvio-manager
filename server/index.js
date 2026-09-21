@@ -28,7 +28,7 @@ import {
   copyPaths,
   vault,
 } from "./core.js";
-import { call, rpc, profile, profileList, backend } from "./nuvio.js";
+import { call, rpc, profile, profileList, backend, providerOf, PROVIDERS, iptvPlaylists, pushIptvPlaylists, radarFollows, pushRadar, radarSearch } from "./nuvio.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const host = process.env.HOST || "127.0.0.1",
@@ -131,7 +131,40 @@ function account(id) {
   assert(found, "Compte introuvable", 404);
   return found;
 }
+// Tuvora's write RPCs expect an origin client id; Nuvio's do not.
+const TUVORA_ORIGIN = "nuvio-web";
+const isTuvora = (a) => providerOf(a.provider).id === "tuvora";
+const originId = (a) => (isTuvora(a) ? { p_origin_client_id: TUVORA_ORIGIN } : {});
+// Tuvora has no sync_patch_profile; mirror its web app by rewriting the whole
+// profiles array through sync_push_profiles.
+async function patchProfileRow(a, t, profileId, patch) {
+  const rows = await rpc("sync_pull_profiles", {}, t, a.provider);
+  const profiles = rows.map((row) => {
+    const base = {
+      profile_index: row.profile_index,
+      name: row.name,
+      avatar_color_hex: row.avatar_color_hex,
+      uses_primary_addons: row.uses_primary_addons,
+      uses_primary_plugins: row.uses_primary_plugins,
+      avatar_id: row.avatar_id,
+      avatar_url: row.avatar_url,
+    };
+    return row.profile_index === profileId ? { ...base, ...patch } : base;
+  });
+  return rpc(
+    "sync_push_profiles",
+    { p_client_max_profiles: Math.max(profiles.length, 6), p_profiles: profiles, ...originId(a) },
+    t,
+    a.provider,
+  );
+}
 const connectionRef = (accountId, profileId) => `${accountId}:${profileId}`;
+// UI language (from the X-Lang header) mapped to a TMDB locale.
+const TMDB_LOCALES = { fr: "fr-FR", en: "en-US", es: "es-ES", de: "de-DE", it: "it-IT" };
+const requestLang = (req) => {
+  const code = String(req.headers["x-lang"] || "").toLowerCase().slice(0, 2);
+  return TMDB_LOCALES[code] ? code : "fr";
+};
 const trackerConfig = (service) => panel.trackerApps?.[service] || {};
 const savePanel = () => db.write("panel-settings", panel);
 // Background sampling of process CPU% and RSS, kept as a 1-week history in the
@@ -202,7 +235,7 @@ async function totalProfiles() {
   let total = 0;
   for (const a of state.accounts) {
     try {
-      total += (await profileList(await token(a))).length;
+      total += (await profileList(await token(a), a.provider)).length;
     } catch {}
   }
   profilesCount = { at: Date.now(), value: total };
@@ -232,7 +265,7 @@ async function overview() {
 async function assertProfile(accountId, profileId) {
   const selected = account(accountId),
     access = await token(selected),
-    rows = await rpc("sync_pull_profiles", {}, access);
+    rows = await rpc("sync_pull_profiles", {}, access, selected.provider);
   assert(rows.some((row) => row.profile_index === profileId), "Profil introuvable", 404);
   return selected;
 }
@@ -275,9 +308,13 @@ async function token(a) {
     refreshing.set(
       a.id,
       (async () => {
-        const t = await call("/auth/v1/token?grant_type=refresh_token", {
-          refresh_token: a.refresh,
-        });
+        const t = await call(
+          "/auth/v1/token?grant_type=refresh_token",
+          { refresh_token: a.refresh },
+          undefined,
+          "POST",
+          a.provider,
+        );
         a.access = t.access_token;
         a.refresh = t.refresh_token;
         a.expires = Date.now() + t.expires_in * 1000;
@@ -287,8 +324,8 @@ async function token(a) {
     );
   return refreshing.get(a.id);
 }
-async function addSession(t) {
-  const info = await call("/auth/v1/user", null, t.access_token, "GET");
+async function addSession(t, providerId = "nuvio") {
+  const info = await call("/auth/v1/user", null, t.access_token, "GET", providerId);
   let a = state.accounts.find((a) => a.id === info.id);
   if (!a) {
     a = { id: info.id };
@@ -296,6 +333,7 @@ async function addSession(t) {
   }
   Object.assign(a, {
     email: info.email,
+    provider: providerOf(providerId).id,
     access: t.access_token,
     refresh: t.refresh_token,
     expires: Date.now() + t.expires_in * 1000,
@@ -324,7 +362,10 @@ function persistBackups(expired = []) {
   expired.forEach((item) => db.remove("backup-" + item.id));
 }
 async function backup(a, reason) {
-  const snapshot = await rpc("sync_export_account_backup", {}, await token(a));
+  // Some providers (Tuvora) have no export RPC; skip the safety snapshot rather
+  // than failing the edit that triggered it.
+  if (!providerOf(a.provider).canBackup) return null;
+  const snapshot = await rpc("sync_export_account_backup", {}, await token(a), a.provider);
   const id = crypto.randomUUID();
   db.write("backup-" + id, snapshot);
   state.backups.unshift({
@@ -492,17 +533,37 @@ const server = http.createServer(async (req, res) => {
         const email = String(b.email || "").trim(),
           password = String(b.password || "");
         assert(email && password, "Email et mot de passe requis", 400);
-        let data;
-        try {
-          data = await call("/auth/v1/token?grant_type=password", { email, password });
-        } catch {
-          throw Object.assign(new Error("Identifiants Nuvio incorrects"), { status: 401 });
-        }
-        const uid = data?.user?.id;
-        const acc = state.accounts.find(
-          (a) => (uid && a.id === uid) || (a.email && a.email.toLowerCase() === email.toLowerCase()),
+        // The account must already be connected by an admin; its provider tells
+        // us which backend (Nuvio or Tuvora) to verify the password against.
+        const candidates = state.accounts.filter(
+          (a) => a.email && a.email.toLowerCase() === email.toLowerCase(),
         );
-        assert(acc, "Ce compte Nuvio n’a pas accès à ce dashboard. Demande à l’administrateur de l’ajouter.", 403);
+        assert(
+          candidates.length,
+          "Ce compte n’a pas accès à ce dashboard. Demande à l’administrateur de l’ajouter.",
+          403,
+        );
+        let acc = null,
+          data = null;
+        for (const candidate of candidates) {
+          try {
+            const attempt = await call(
+              "/auth/v1/token?grant_type=password",
+              { email, password },
+              undefined,
+              "POST",
+              candidate.provider,
+            );
+            if (attempt?.user?.id === candidate.id) {
+              acc = candidate;
+              data = attempt;
+              break;
+            }
+          } catch {
+            /* wrong password on this provider, try the next match */
+          }
+        }
+        if (!acc) throw Object.assign(new Error("Identifiants incorrects"), { status: 401 });
         if (data.access_token) {
           acc.access = data.access_token;
           acc.refresh = data.refresh_token || acc.refresh;
@@ -525,6 +586,8 @@ const server = http.createServer(async (req, res) => {
       const viewer = session.role === "nuvio"
         ? { role: "nuvio", account: session.account }
         : { role: "admin", account: null };
+      const uiLang = requestLang(req);
+      const tmdbLanguage = TMDB_LOCALES[uiLang];
       const b = req.method === "GET"
         ? {}
         : await body(req, url.pathname === "/api/backup/restore-file" ? 25_000_000 : 2_000_000);
@@ -541,7 +604,7 @@ const server = http.createServer(async (req, res) => {
         "/api/settings/proxy/test", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
-        "/api/accounts/rename", "/api/accounts/remove",
+        "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
         "/api/library/save", "/api/library/refresh-logos", "/api/library/remove",
         "/api/backup/create", "/api/backup/delete", "/api/backup/restore",
         "/api/backup/restore-file", "/api/backup/download",
@@ -683,7 +746,7 @@ const server = http.createServer(async (req, res) => {
           viewer: { role: viewer.role, account: viewer.account, isAdmin },
           accounts: state.accounts
             .filter((a) => isAdmin || a.id === viewer.account)
-            .map(({ id, email, name }) => ({ id, email, name: name || email })),
+            .map(({ id, email, name, provider }) => ({ id, email, name: name || email, provider: providerOf(provider).id })),
           library: isAdmin ? state.library : [],
           backups: isAdmin ? state.backups : [],
           backend,
@@ -698,17 +761,22 @@ const server = http.createServer(async (req, res) => {
         return json(res, { ok: true });
       }
       if (route === "/api/pair/start") {
+        const provider = providerOf(b.provider);
         const nonce = crypto.randomBytes(24).toString("hex");
         const result = (
-          await rpc("start_tv_login_session", {
-            p_device_nonce: nonce,
-            p_redirect_base_url:
-              process.env.NUVIO_LOGIN_URL || "https://nuvio.tv/tv-login",
-            p_device_name: "Nuvio Manager",
-          })
+          await rpc(
+            "start_tv_login_session",
+            {
+              p_device_nonce: nonce,
+              p_redirect_base_url: provider.loginUrl,
+              p_device_name: "Nuvio Manager",
+            },
+            undefined,
+            provider.id,
+          )
         )[0];
         const id = crypto.randomUUID();
-        pairings.set(id, { ...result, nonce });
+        pairings.set(id, { ...result, nonce, provider: provider.id });
         return json(res, { id, ...result });
       }
       if (route === "/api/pair/poll") {
@@ -718,23 +786,59 @@ const server = http.createServer(async (req, res) => {
         p.busy = true;
         try {
           const result = (
-            await rpc("poll_tv_login_session", {
-              p_code: p.code,
-              p_device_nonce: p.nonce,
-            })
+            await rpc(
+              "poll_tv_login_session",
+              {
+                p_code: p.code,
+                p_device_nonce: p.nonce,
+              },
+              undefined,
+              p.provider,
+            )
           )[0];
           if (result.status !== "approved")
             return json(res, { status: result.status });
-          const t = await call("/functions/v1/tv-logins-exchange", {
-            code: p.code,
-            device_nonce: p.nonce,
-          });
-          const a = await addSession(t);
+          const t = await call(
+            "/functions/v1/tv-logins-exchange",
+            {
+              code: p.code,
+              device_nonce: p.nonce,
+            },
+            undefined,
+            "POST",
+            p.provider,
+          );
+          const a = await addSession(t, p.provider);
           pairings.delete(b.id);
           return json(res, { status: "connected", account: a });
         } finally {
           p.busy = false;
         }
+      }
+      if (route === "/api/accounts/connect") {
+        // Password connect for providers whose device-login flow the dashboard
+        // cannot drive as anon (Tuvora). The password is exchanged for tokens
+        // and never stored — only the resulting refresh token is kept.
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const providerId = providerOf(b.provider).id;
+        const email = String(b.email || "").trim(),
+          password = String(b.password || "");
+        assert(email && password, "Email et mot de passe requis", 400);
+        let data;
+        try {
+          data = await call(
+            "/auth/v1/token?grant_type=password",
+            { email, password },
+            undefined,
+            "POST",
+            providerId,
+          );
+        } catch {
+          throw Object.assign(new Error("Identifiants incorrects"), { status: 401 });
+        }
+        assert(data?.access_token, "Identifiants incorrects", 401);
+        const connected = await addSession(data, providerId);
+        return json(res, { status: "connected", account: connected });
       }
       if (route === "/api/accounts/rename") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
@@ -765,25 +869,71 @@ const server = http.createServer(async (req, res) => {
         statisticsCache.clear();
         return json(res, { ok: true });
       }
-      if (route === "/api/profiles")
-        return json(
-          res,
-          await profileList(
-            await token(account(url.searchParams.get("accountId"))),
-          ),
-        );
+      if (route === "/api/profiles") {
+        const a = account(url.searchParams.get("accountId"));
+        return json(res, await profileList(await token(a), a.provider));
+      }
       if (route === "/api/xperience-avatars") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
         return json(res, await getXperienceAvatars());
       }
       if (route === "/api/activity") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
-        const result = await activity(await token(account(url.searchParams.get("accountId"))), Number(url.searchParams.get("profileId")), url.searchParams.get("kind"), Number(url.searchParams.get("page") || 1));
+        const activityAccount = account(url.searchParams.get("accountId"));
+        const result = await activity(await token(activityAccount), Number(url.searchParams.get("profileId")), url.searchParams.get("kind"), Number(url.searchParams.get("page") || 1), activityAccount.provider);
         return json(res, await enrichActivity(result, {
           key: panel.tmdbKey,
           cache: tmdbCache,
           persist: (value) => db.write("tmdb-cache", value),
+          language: tmdbLanguage,
         }));
+      }
+      if (route === "/api/iptv") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        const a = account(url.searchParams.get("accountId"));
+        assert(providerOf(a.provider).id === "tuvora", "Réservé aux comptes Tuvora", 400);
+        const playlists = await iptvPlaylists(await token(a), Number(url.searchParams.get("profileId")), a.provider);
+        return json(res, { playlists });
+      }
+      if (route === "/api/iptv/save") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const a = account(b.accountId);
+        assert(providerOf(a.provider).id === "tuvora", "Réservé aux comptes Tuvora", 400);
+        assert(Array.isArray(b.playlists), "Liste de playlists invalide", 400);
+        let backupId = null;
+        try {
+          backupId = await backup(a, "Modification des playlists IPTV");
+        } catch {
+          /* Tuvora may not expose the backup RPC; the save still proceeds. */
+        }
+        const result = await pushIptvPlaylists(await token(a), Number(b.profileId), b.playlists, a.provider);
+        statisticsCache.clear();
+        return json(res, { ok: true, result, backupId });
+      }
+      if (route === "/api/sports") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        const a = account(url.searchParams.get("accountId"));
+        assert(providerOf(a.provider).id === "tuvora", "Réservé aux comptes Tuvora", 400);
+        const data = await radarFollows(await token(a), Number(url.searchParams.get("profileId")), a.provider);
+        return json(res, data);
+      }
+      if (route === "/api/sports/save") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const a = account(b.accountId);
+        assert(providerOf(a.provider).id === "tuvora", "Réservé aux comptes Tuvora", 400);
+        assert(Array.isArray(b.leagues) && Array.isArray(b.teams), "Sélection sport invalide", 400);
+        const result = await pushRadar(await token(a), Number(b.profileId), b.leagues, b.teams, a.provider);
+        return json(res, { ok: true, result });
+      }
+      if (route === "/api/sports/search") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        const a = account(url.searchParams.get("accountId"));
+        assert(providerOf(a.provider).id === "tuvora", "Réservé aux comptes Tuvora", 400);
+        const kind = url.searchParams.get("kind") === "team" ? "team" : "league";
+        const query = String(url.searchParams.get("q") || "").trim();
+        if (query.length < 2) return json(res, { results: [] });
+        const results = await radarSearch(await token(a), kind, query, a.provider);
+        return json(res, { results });
       }
       if (route === "/api/statistics") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
@@ -796,7 +946,7 @@ const server = http.createServer(async (req, res) => {
             .filter(Boolean),
         )].sort();
         const statsAccounts = isAdmin ? state.accounts : state.accounts.filter((a) => a.id === viewer.account);
-        const cacheKey = `stats-v5:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
+        const cacheKey = `stats-v5:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
         const cached = statisticsCache.get(cacheKey);
         if (!url.searchParams.has("refresh") && cached?.expiresAt > Date.now())
           return json(res, cached.value);
@@ -806,13 +956,15 @@ const server = http.createServer(async (req, res) => {
           externalHistory,
           getProfiles: profileList,
         });
-        // Profiles that opted out of their Nuvio history keep only Trakt/Simkl.
+        // Profiles that opted out of their own app history (Nuvio or Tuvora)
+        // keep only Trakt/Simkl.
         const nuvioDisabled = panel.statsNuvioDisabled || {};
+        const ownHistory = (source) => source === "nuvio" || source === "tuvora";
         for (const profile of dataset) {
           if (!nuvioDisabled[profile.ref]) continue;
-          profile.events = profile.events.filter((event) => event.source !== "nuvio");
+          profile.events = profile.events.filter((event) => !ownHistory(event.source));
           profile.progress = [];
-          profile.sources = profile.sources.filter((source) => source !== "nuvio");
+          profile.sources = profile.sources.filter((source) => !ownHistory(source));
         }
         const availableProfiles = dataset.map((profile) => ({
           ref: profile.ref,
@@ -837,6 +989,7 @@ const server = http.createServer(async (req, res) => {
             key: panel.tmdbKey,
             cache: tmdbCache,
             persist: (value) => db.write("tmdb-cache", value),
+            language: tmdbLanguage,
           },
         );
         const metadata = new Map(
@@ -961,14 +1114,17 @@ const server = http.createServer(async (req, res) => {
         statisticsCache.clear();
         return json(res, { ok: true });
       }
-      if (route === "/api/profile")
+      if (route === "/api/profile") {
+        const a = account(url.searchParams.get("accountId"));
         return json(
           res,
           await profile(
-            await token(account(url.searchParams.get("accountId"))),
+            await token(a),
             Number(url.searchParams.get("profileId")),
+            a.provider,
           ),
         );
+      }
       if (route === "/api/profile/identity") {
         const a = account(b.accountId);
         assert(typeof b.name === "string" && b.name.trim(), "Nom requis");
@@ -980,28 +1136,39 @@ const server = http.createServer(async (req, res) => {
         const avatarUrl = typeof b.avatarUrl === "string" ? b.avatarUrl.trim() : "";
         assert(!(avatarId && avatarUrl), "Choisissez un avatar Nuvio ou une URL personnalisée");
         const normalizedAvatarUrl = avatarUrl ? normalizeUrl(avatarUrl) : null;
+        const t = await token(a);
         const id = await backup(a, "Modification du profil");
-        const result = await rpc(
-          "sync_patch_profile",
-          {
-            p_profile_id: Number(b.profileId),
-            p_name: b.name.trim(),
-            p_avatar_color_hex: b.color.toUpperCase(),
-            p_uses_primary_addons: Boolean(b.inheritAddons),
-            p_uses_primary_plugins: Boolean(b.inheritPlugins),
-            p_avatar_url: normalizedAvatarUrl,
-            p_avatar_url_provided: !avatarId,
-            p_avatar_id: avatarId || null,
-            p_avatar_id_provided: Boolean(avatarId),
-          },
-          await token(a),
-        );
+        const patch = {
+          name: b.name.trim(),
+          avatar_color_hex: b.color.toUpperCase(),
+          uses_primary_addons: Boolean(b.inheritAddons),
+          uses_primary_plugins: Boolean(b.inheritPlugins),
+          ...(avatarId ? { avatar_id: avatarId } : { avatar_url: normalizedAvatarUrl }),
+        };
+        const result = isTuvora(a)
+          ? await patchProfileRow(a, t, Number(b.profileId), patch)
+          : await rpc(
+              "sync_patch_profile",
+              {
+                p_profile_id: Number(b.profileId),
+                p_name: patch.name,
+                p_avatar_color_hex: patch.avatar_color_hex,
+                p_uses_primary_addons: patch.uses_primary_addons,
+                p_uses_primary_plugins: patch.uses_primary_plugins,
+                p_avatar_url: normalizedAvatarUrl,
+                p_avatar_url_provided: !avatarId,
+                p_avatar_id: avatarId || null,
+                p_avatar_id_provided: Boolean(avatarId),
+              },
+              t,
+              a.provider,
+            );
         return json(res, { result, backupId: id });
       }
       if (route === "/api/profile/create") {
         const a = account(b.accountId),
           t = await token(a),
-          rows = await rpc("sync_pull_profiles", {}, t);
+          rows = await rpc("sync_pull_profiles", {}, t, a.provider);
         assert(typeof b.name === "string" && b.name.trim(), "Nom requis");
         const index = [1, 2, 3, 4, 5, 6].find(
           (id) => !rows.some((p) => p.profile_index === id),
@@ -1040,8 +1207,10 @@ const server = http.createServer(async (req, res) => {
                 uses_primary_plugins: false,
               },
             ],
+            ...originId(a),
           },
           t,
+          a.provider,
         );
         return json(res, { backupId });
       }
@@ -1092,7 +1261,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (route === "/api/preview") {
         const a = account(b.accountId),
-          target = await profile(await token(a), Number(b.profileId));
+          target = await profile(await token(a), Number(b.profileId), a.provider);
         let desired = b.desired;
         if (b.source) {
           assert(
@@ -1100,9 +1269,11 @@ const server = http.createServer(async (req, res) => {
               Number(b.source.profileId) !== Number(b.profileId),
             "Choisis un profil différent",
           );
+          const sourceAccount = account(b.source.accountId);
           const source = await profile(
-            await token(account(b.source.accountId)),
+            await token(sourceAccount),
             Number(b.source.profileId),
+            sourceAccount.provider,
           );
           desired = {};
           for (const part of ["tv", "mobile"])
@@ -1175,7 +1346,7 @@ const server = http.createServer(async (req, res) => {
         try {
           const a = account(p.accountId),
             t = await token(a),
-            current = await profile(t, p.profileId);
+            current = await profile(t, p.profileId, a.provider);
           assert(
             hash(snapshotParts(current, Object.keys(p.desired))) ===
               hash(p.before),
@@ -1185,21 +1356,37 @@ const server = http.createServer(async (req, res) => {
           backupId = await backup(a, "Avant enregistrement / copie");
           for (const [part, value] of Object.entries(p.desired)) {
             if (part === "tv" || part === "mobile")
-              await rpc(
-                "sync_push_profile_settings_blob_guarded",
-                {
-                  p_profile_id: p.profileId,
-                  p_platform: part,
-                  p_settings_json: value,
-                  p_expected_updated_at: current[part].updated_at,
-                },
-                t,
-              );
+              // Tuvora has no *_guarded variant (no optimistic-lock param); it
+              // uses the plain blob push with an origin client id instead.
+              await (isTuvora(a)
+                ? rpc(
+                    "sync_push_profile_settings_blob",
+                    {
+                      p_profile_id: p.profileId,
+                      p_platform: part,
+                      p_settings_json: value,
+                      ...originId(a),
+                    },
+                    t,
+                    a.provider,
+                  )
+                : rpc(
+                    "sync_push_profile_settings_blob_guarded",
+                    {
+                      p_profile_id: p.profileId,
+                      p_platform: part,
+                      p_settings_json: value,
+                      p_expected_updated_at: current[part].updated_at,
+                    },
+                    t,
+                    a.provider,
+                  ));
             else
               await rpc(
                 "sync_push_" + part,
-                { p_profile_id: p.profileId, ["p_" + part]: value },
+                { p_profile_id: p.profileId, ["p_" + part]: value, ...originId(a) },
                 t,
+                a.provider,
               );
             completed.push(part);
           }
@@ -1219,10 +1406,11 @@ const server = http.createServer(async (req, res) => {
           locks.delete(key);
         }
       }
-      if (route === "/api/backup/create")
-        return json(res, {
-          id: await backup(account(b.accountId), "Sauvegarde manuelle"),
-        });
+      if (route === "/api/backup/create") {
+        const a = account(b.accountId);
+        assert(providerOf(a.provider).canBackup, "Les sauvegardes ne sont pas disponibles pour les comptes Tuvora.", 400);
+        return json(res, { id: await backup(a, "Sauvegarde manuelle") });
+      }
       if (route === "/api/backup/delete") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
         const item = state.backups.find((entry) => entry.id === b.id);
@@ -1234,6 +1422,7 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/backup/restore" || route === "/api/backup/restore-file") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
         const a = account(b.accountId);
+        assert(providerOf(a.provider).canBackup, "Les sauvegardes ne sont pas disponibles pour les comptes Tuvora.", 400);
         let snapshot;
         if (route.endsWith("restore-file")) snapshot = validateBackupSnapshot(b.backup);
         else {
@@ -1246,6 +1435,7 @@ const server = http.createServer(async (req, res) => {
           "sync_restore_account_backup",
           { p_backup: snapshot, p_mode: "replace" },
           await token(a),
+          a.provider,
         );
         statisticsCache.clear();
         return json(res, { ok: true, result, safetyBackupId });
@@ -1273,10 +1463,22 @@ const server = http.createServer(async (req, res) => {
     const files = {
       "/": "index.html",
       "/app.js": "app.js",
+      "/i18n.js": "i18n.js",
+      "/i18n/fr.js": "i18n/fr.js",
+      "/i18n/en.js": "i18n/en.js",
+      "/i18n/es.js": "i18n/es.js",
+      "/i18n/de.js": "i18n/de.js",
+      "/i18n/it.js": "i18n/it.js",
+      "/i18n/x-en.js": "i18n/x-en.js",
+      "/i18n/x-es.js": "i18n/x-es.js",
+      "/i18n/x-de.js": "i18n/x-de.js",
+      "/i18n/x-it.js": "i18n/x-it.js",
       "/panel-settings.js": "panel-settings.js",
       "/activity.js": "activity.js",
       "/statistics.js": "statistics.js",
       "/connections.js": "connections.js",
+      "/iptv.js": "iptv.js",
+      "/sports.js": "sports.js",
       "/theme.js": "theme.js",
       "/catalog.js": "catalog.js",
       "/settings-controls.js": "settings-controls.js",
@@ -1289,6 +1491,7 @@ const server = http.createServer(async (req, res) => {
       "/assets/nuvio-manager-logo.png": "assets/nuvio-manager-logo.png",
       "/assets/nuvio_login.webp": "assets/nuvio_login.webp",
       "/assets/nuvio_logo.png": "assets/nuvio_logo.png",
+      "/assets/tuvora_logo.svg": "assets/tuvora_logo.svg",
       "/assets/favicon.png": "assets/favicon.png",
       "/style.css": "style.css",
       "/aurora.css": "aurora.css",
@@ -1310,7 +1513,9 @@ const server = http.createServer(async (req, res) => {
               ? "application/json; charset=utf-8"
               : url.pathname.endsWith(".css")
                 ? "text/css; charset=utf-8"
-                : "text/html; charset=utf-8",
+                : url.pathname.endsWith(".svg")
+                  ? "image/svg+xml; charset=utf-8"
+                  : "text/html; charset=utf-8",
     );
     res.end(fs.readFileSync(path.join(root, "public", files[url.pathname])));
   } catch (e) {

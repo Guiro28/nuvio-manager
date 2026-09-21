@@ -32,15 +32,16 @@ async function request(path, key, fetchImpl) {
   return response.json();
 }
 
-async function genreMap(type, key, cache, fetchImpl) {
-  const cached = cache.genres?.[type];
+async function genreMap(type, key, cache, fetchImpl, language) {
+  const genreKey = `${language}:${type}`;
+  const cached = cache.genres?.[genreKey];
   if (cached?.expiresAt > Date.now()) return cached.values;
-  const data = await request(`/genre/${type}/list?language=fr-FR`, key, fetchImpl);
+  const data = await request(`/genre/${type}/list?language=${encodeURIComponent(language)}`, key, fetchImpl);
   const values = Object.fromEntries(
     (data.genres || []).map((genre) => [genre.id, genre.name]),
   );
   cache.genres ??= {};
-  cache.genres[type] = { expiresAt: Date.now() + MONTH, values };
+  cache.genres[genreKey] = { expiresAt: Date.now() + MONTH, values };
   return values;
 }
 
@@ -49,13 +50,13 @@ function selectResult(data, contentType) {
   return expected?.[0] || data.movie_results?.[0] || data.tv_results?.[0] || null;
 }
 
-async function lookup(row, key, cache, fetchImpl) {
+async function lookup(row, key, cache, fetchImpl, language) {
   if (!/^tt\d+$/i.test(row.content_id || "")) return null;
-  const cacheKey = `${row.content_type}:${row.content_id.toLowerCase()}`;
+  const cacheKey = `${language}:${row.content_type}:${row.content_id.toLowerCase()}`;
   const cached = cache.entries?.[cacheKey];
   if (cached?.expiresAt > Date.now()) return cached.value;
   const data = await request(
-    `/find/${encodeURIComponent(row.content_id)}?external_source=imdb_id&language=fr-FR`,
+    `/find/${encodeURIComponent(row.content_id)}?external_source=imdb_id&language=${encodeURIComponent(language)}`,
     key,
     fetchImpl,
   );
@@ -63,7 +64,7 @@ async function lookup(row, key, cache, fetchImpl) {
   let value = null;
   if (result) {
     const type = result.media_type === "movie" || result.title ? "movie" : "tv";
-    const genres = await genreMap(type, key, cache, fetchImpl);
+    const genres = await genreMap(type, key, cache, fetchImpl, language);
     value = {
       id: result.id,
       type,
@@ -90,7 +91,7 @@ async function lookup(row, key, cache, fetchImpl) {
 
 export async function enrichActivity(
   result,
-  { key, cache = {}, persist = () => {}, fetchImpl = fetch } = {},
+  { key, cache = {}, persist = () => {}, fetchImpl = fetch, language = "fr-FR" } = {},
 ) {
   if (!String(key || "").trim())
     return { ...result, tmdb: { configured: false }, items: result.items };
@@ -113,7 +114,7 @@ export async function enrichActivity(
       try {
         found.set(
           `${row.content_type}:${row.content_id}`,
-          await lookup(row, key, cache, fetchImpl),
+          await lookup(row, key, cache, fetchImpl, language),
         );
       } catch (error) {
         fatal = error;

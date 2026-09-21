@@ -1,4 +1,5 @@
 import { schema } from "./settings-schema.js";
+import { t } from "./i18n.js";
 import {
   appOnlySettingKeys,
   settingDescription,
@@ -140,10 +141,11 @@ const isSelected = (value, optionValue, multiple) => multiple ? Array.isArray(va
 
 function choiceCards(meta, value, options, attributes) {
   const swatches = meta.control === "swatches";
-  return `<div class="${swatches ? "swatch-control" : "segmented-control"}" role="radiogroup" aria-label="${esc(meta.title)}">${options.map((option, index) => {
+  return `<div class="${swatches ? "swatch-control" : "segmented-control"}" role="radiogroup" aria-label="${esc(t(meta.title))}">${options.map((option, index) => {
     const description = settingOptionDescription(meta, option);
+    const optionLabel = t(option.label);
     const swatchClass = String(option.value || "custom").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-    return `<label class="choice-card${option.supporterOnly ? " supporter-choice" : ""}"${description ? ` title="${esc(description)}"` : ""}><input ${attributes} data-kind="choice" type="radio" name="${esc(`${meta.feature}-${meta.key}`)}" value="${index}" ${isSelected(value, option.value, false) ? "checked" : ""} aria-label="${esc(`${meta.title} : ${option.label}`)}"><span${swatches ? ` class="theme-swatch swatch-${esc(swatchClass)}"` : ""}>${swatches ? "" : esc(option.label)}</span>${swatches ? `<span class="choice-label">${esc(option.label)}</span>` : ""}${option.supporterOnly ? "<small>Supporter</small>" : ""}${description ? `<small>${esc(description)}</small>` : ""}</label>`;
+    return `<label class="choice-card${option.supporterOnly ? " supporter-choice" : ""}"${description ? ` title="${esc(description)}"` : ""}><input ${attributes} data-kind="choice" type="radio" name="${esc(`${meta.feature}-${meta.key}`)}" value="${index}" ${isSelected(value, option.value, false) ? "checked" : ""} aria-label="${esc(`${t(meta.title)} : ${optionLabel}`)}"><span${swatches ? ` class="theme-swatch swatch-${esc(swatchClass)}"` : ""}>${swatches ? "" : esc(optionLabel)}</span>${swatches ? `<span class="choice-label">${esc(optionLabel)}</span>` : ""}${option.supporterOnly ? "<small>Supporter</small>" : ""}${description ? `<small>${esc(description)}</small>` : ""}</label>`;
   }).join("")}</div>`;
 }
 
@@ -154,13 +156,13 @@ const argbToRgb = (value) => {
 };
 
 export function settingControl(item, attributes, context = {}) {
-  const meta = item.meta, value = item.value, label = meta?.title || item.label;
+  const meta = item.meta, value = item.value, label = meta?.title ? t(meta.title) : item.label;
   const attrs = `${attributes} aria-label="${esc(label)}"`;
   if (meta?.options || meta?.runtimeOptions) {
     const options = choices(meta, value, context);
     if (["segmented", "swatches"].includes(meta.control)) return choiceCards(meta, value, options, attributes);
     const multiple = meta.control === "multiselect";
-    return `<select ${attrs} data-kind="choice" ${multiple ? 'multiple size="5"' : ""}>${options.map((option, index) => `<option value="${index}" ${isSelected(value, option.value, multiple) ? "selected" : ""}>${esc(option.label)}${option.supporterOnly ? " · Supporter" : ""}</option>`).join("")}</select>${multiple ? '<small class="muted">Plusieurs choix possibles. Aucun choix signifie aucune restriction.</small>' : ""}`;
+    return `<select ${attrs} data-kind="choice" ${multiple ? 'multiple size="5"' : ""}>${options.map((option, index) => `<option value="${index}" ${isSelected(value, option.value, multiple) ? "selected" : ""}>${esc(t(option.label))}${option.supporterOnly ? " · Supporter" : ""}</option>`).join("")}</select>${multiple ? `<small class="muted">${esc(t("Plusieurs choix possibles. Aucun choix signifie aucune restriction."))}</small>` : ""}`;
   }
   if (typeof value === "boolean") return `<input ${attrs} type="checkbox" ${value ? "checked" : ""}>`;
   if (Array.isArray(value) || value === null || typeof value === "object") return `<textarea ${attrs} data-kind="json">${esc(JSON.stringify(value, null, 2))}</textarea>`;

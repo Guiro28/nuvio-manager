@@ -217,7 +217,7 @@ nav button {
   color: var(--text-muted);
   line-height: 1.45;
 }
-nav button span {
+nav button span:not(.nav-label) {
   font-size: 1.15rem;
   width: 18px;
 }
@@ -1082,7 +1082,223 @@ dialog:has(> .nuvio-pair) {
   .nuvio-pair-spinner,
   .nuvio-pair-status-dot { animation: none; }
   .nuvio-pair-primary { transition: none; }
+  .acct-choice { transition: none; }
 }
+
+/* Tuvora provider variant of the pairing dialog (amber instead of purple). */
+.nuvio-pair.provider-tuvora {
+  --purple: #f0b429;
+  --purple-hover: #f6c451;
+  --selected-ink: #f7dc9a;
+  --focus-wash: #f0b42926;
+}
+.nuvio-pair.provider-tuvora .nuvio-pair-primary {
+  color: #141414;
+  background: linear-gradient(115deg, #f6c451, #f0b429);
+  border-color: #f7d27a;
+  box-shadow: 0 10px 30px #f0b42933;
+}
+.nuvio-pair.provider-tuvora .nuvio-pair-primary:hover {
+  color: #141414;
+  box-shadow: 0 14px 34px #f0b4294d;
+}
+
+.nuvio-pair-form {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin-top: 4px;
+  text-align: left;
+}
+.nuvio-pair-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.nuvio-pair-form input {
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--input) 86%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  color: var(--ink);
+  font-size: .95rem;
+}
+.nuvio-pair-form input:focus {
+  outline: none;
+  border-color: var(--purple);
+  box-shadow: 0 0 0 3px var(--focus-wash);
+}
+.nuvio-pair-form .nuvio-pair-primary { margin-top: 6px; }
+.nuvio-pair-form .error { margin: 2px 0 0; }
+.nuvio-pair-note {
+  position: relative;
+  z-index: 1;
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.nuvio-pair-logo-svg {
+  display: grid;
+  place-items: center;
+  width: 82px;
+  height: 82px;
+}
+.nuvio-pair-logo-svg svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 10px 22px #0007);
+}
+
+/* Account provider chooser (Nuvio vs Tuvora). */
+dialog:has(> .acct-chooser) {
+  width: min(520px, calc(100% - 30px));
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+}
+.acct-chooser {
+  --ink: #f1f0f7;
+  --text-muted: #a6a3b5;
+  --surface: #15151e;
+  --border: #2a2836;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 40px 34px;
+  text-align: center;
+  color: var(--ink);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--surface) 96%, #19122c), var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 28px 80px #05020f80, inset 0 1px #ffffff0a;
+}
+.acct-chooser h2 {
+  margin: 0;
+  font-size: clamp(1.4rem, 4vw, 1.8rem);
+  letter-spacing: -0.03em;
+}
+.acct-chooser-intro {
+  margin: 10px 0 24px;
+  color: var(--text-muted);
+}
+.acct-chooser-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: 100%;
+}
+@media (max-width: 460px) {
+  .acct-chooser-options { grid-template-columns: 1fr; }
+}
+.acct-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 26px 16px 22px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #101018;
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.acct-choice:hover { transform: translateY(-3px); }
+.acct-choice-logo {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  object-fit: contain;
+}
+.acct-choice-logo-svg svg { width: 100%; height: 100%; }
+.acct-choice-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.acct-choice-desc {
+  font-size: .8rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+.acct-choice-nuvio {
+  background: color-mix(in srgb, #8f76ff 12%, #101018);
+  border-color: color-mix(in srgb, #8f76ff 45%, var(--border));
+}
+.acct-choice-nuvio .acct-choice-name { color: #b9a7ff; }
+.acct-choice-nuvio:hover { border-color: #8f76ff; box-shadow: 0 16px 40px #8f76ff33; }
+.acct-choice-tuvora {
+  background: color-mix(in srgb, #f0b429 12%, #101018);
+  border-color: color-mix(in srgb, #f0b429 45%, var(--border));
+}
+.acct-choice-tuvora .acct-choice-name { color: #f0b429; }
+.acct-choice-tuvora:hover { border-color: #f0b429; box-shadow: 0 16px 40px #f0b42933; }
+
+/* Tuvora Sports Centre (leagues + teams) */
+.sport-section { margin-top: 18px; }
+.sport-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.sport-section-head h3 { margin: 0; font-size: 1rem; }
+.sport-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: var(--surface-2, var(--input, #101018));
+}
+.sport-badge {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.sport-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.sport-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sport-row .actions { flex: 0 0 auto; }
+.sport-results {
+  max-height: 340px;
+  overflow-y: auto;
+  margin: 6px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sport-result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+.sport-result:hover:not([disabled]) { border-color: var(--accent); }
+.sport-result[disabled] { opacity: .55; cursor: default; }
+.sport-result .sport-info { flex: 1; }
 .footer-note {
   font-size: 0.8rem;
   color: var(--muted);
@@ -1164,7 +1380,7 @@ hr {
     font-size: 0.8rem;
     padding: 10px;
   }
-  nav button span {
+  nav button span:not(.nav-label) {
     display: none;
   }
   header {
@@ -1487,6 +1703,49 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .metric {padding:20px;border-radius:12px;border:1px solid var(--border);background:linear-gradient(140deg,var(--focus-wash),var(--surface));}
 .metric span {display:block;color:var(--text-muted);font-size:.8rem;margin-bottom:8px;}
 .metric strong {font-size:1.55rem;letter-spacing:-.04em;}
+.lang-menu {position:relative;}
+.lang-menu summary {display:flex;align-items:center;gap:8px;padding:8px 11px;font-size:.85rem;border:1px solid var(--border-strong);border-radius:8px;background:var(--button);color:inherit;cursor:pointer;list-style:none;user-select:none;}
+.lang-menu summary::-webkit-details-marker {display:none;}
+.lang-menu summary:hover {background:var(--button-hover);}
+.lang-menu[open] summary {border-color:var(--accent);}
+.lang-caret {font-size:1rem;transition:transform .16s ease;margin-left:2px;}
+.lang-menu[open] .lang-caret {transform:rotate(180deg);}
+.lang-flag {flex:none;width:22px;height:16px;border-radius:3px;overflow:hidden;display:block;box-shadow:0 0 0 1px rgba(0,0,0,.12);}
+.lang-flag svg {width:100%;height:100%;display:block;object-fit:cover;}
+.lang-list {position:absolute;z-index:60;top:calc(100% + 6px);right:0;min-width:160px;padding:6px;border:1px solid var(--border-strong);border-radius:10px;background:var(--panel);box-shadow:0 18px 45px rgba(0,0,0,.32);display:grid;gap:2px;}
+.lang-option {display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:7px;background:transparent;color:inherit;font-size:.9rem;text-align:left;cursor:pointer;}
+.lang-option:hover {background:var(--selected);}
+.lang-option[aria-selected="true"] {background:var(--selected);color:var(--accent);}
+
+/* Custom account selector (name left, provider icon + type right). */
+/* Lift the whole bar above the profile grid while the menu is open so the
+   dropdown overlays the profile tiles instead of rendering behind them. */
+.account-bar:has(.acct-menu[open]) {position:relative;z-index:70;}
+.acct-menu {position:relative;min-width:280px;}
+.acct-menu summary {display:flex;align-items:center;gap:10px;padding:10px 12px;font-size:.9rem;border:1px solid var(--border-strong);border-radius:7px;background:#0f1626;color:var(--ink);cursor:pointer;list-style:none;user-select:none;}
+.acct-menu summary::-webkit-details-marker {display:none;}
+.acct-menu summary:hover {border-color:var(--accent);}
+.acct-menu[open] summary {border-color:var(--accent);}
+.acct-current-name, .acct-option-name {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.acct-caret {font-size:1rem;transition:transform .16s ease;margin-left:2px;flex:none;}
+.acct-menu[open] .acct-caret {transform:rotate(180deg);}
+.acct-list {position:absolute;z-index:60;top:calc(100% + 6px);left:0;right:0;padding:6px;border:1px solid var(--border-strong);border-radius:10px;background:#0f1626;box-shadow:0 18px 45px rgba(0,0,0,.45);display:grid;gap:2px;max-height:320px;overflow-y:auto;}
+/* Opaque backgrounds so the dropdown never shows the profile tiles through it. */
+:root[data-theme="light"] .acct-menu summary,
+:root[data-theme="light"] .acct-list {background:#ffffff;}
+.acct-option {display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border:0;border-radius:7px;background:transparent;color:inherit;font-size:.9rem;text-align:left;cursor:pointer;}
+.acct-option:hover {background:var(--selected);}
+.acct-option[aria-selected="true"] {background:var(--selected);}
+/* Push the provider badge to the far right of both the summary and each row. */
+.acct-menu summary .acct-type, .acct-option .acct-type {margin-left:auto;}
+.acct-type {display:inline-flex;align-items:center;gap:6px;flex:none;padding:3px 9px 3px 6px;border-radius:999px;font-size:.72rem;font-weight:650;letter-spacing:.02em;border:1px solid var(--border);background:var(--button);}
+.acct-type-name {white-space:nowrap;}
+.acct-type-nuvio {color:var(--purple);border-color:color-mix(in srgb,var(--purple) 45%,var(--border));}
+.acct-type-tuvora {color:#f0b429;border-color:color-mix(in srgb,#f0b429 45%,var(--border));}
+.acct-type-icon {width:18px;height:18px;flex:none;border-radius:5px;object-fit:contain;display:block;}
+.acct-type-icon-svg {display:grid;place-items:center;overflow:hidden;}
+.acct-type-icon-svg svg {width:100%;height:100%;display:block;}
+@media (max-width:720px){.acct-menu{min-width:0;width:100%;}}
 .metric.metric-home {grid-template-columns:56px minmax(0,1fr);align-content:center;}
 .metric.metric-home::before {display:none;}
 .metric.metric-home .metric-ic {grid-column:1;grid-row:1/3;align-self:center;justify-self:center;display:grid;place-items:center;}
@@ -1692,6 +1951,8 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .connection-card h3 {margin:2px 0 8px;}
 .connection-logo {width:52px;height:52px;border-radius:13px;display:block;object-fit:cover;background:var(--button);border:1px solid var(--border);}
 .stats-source-card .connection-logo {object-fit:contain;padding:7px;}
+.connection-logo-svg {padding:0;display:grid;place-items:center;overflow:hidden;}
+.connection-logo-svg svg {width:100%;height:100%;}
 .stats-source-toggle {display:flex;align-items:center;gap:9px;margin-top:10px;cursor:pointer;font-size:.92rem;}
 .stats-source-toggle input {width:18px;height:18px;accent-color:var(--accent);flex:none;}
 .connection-ok {color:#4ecb71;font-weight:650;}

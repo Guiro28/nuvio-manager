@@ -23,25 +23,25 @@
         >
         <nav id="nav">
           <button data-page="home" class="active">
-            <span>⌂</span> Accueil</button
+            <span>⌂</span> <span class="nav-label">Accueil</span></button
           ><button data-page="profiles">
-            <span>▦</span> Comptes & profils</button
-          ><button data-page="statistics"><span>▥</span> Statistiques</button
+            <span>▦</span> <span class="nav-label">Comptes & profils</span></button
+          ><button data-page="statistics"><span>▥</span> <span class="nav-label">Statistiques</span></button
           ><button data-page="library">
-            <span>⊞</span> Bibliothèque d’addons</button
-          ><button data-page="copy"><span>⇄</span> Cloner un profil</button
-          ><button data-page="proxy"><span>⇢</span> Proxy</button
-          ><button data-page="backups"><span>↶</span> Sauvegardes</button>
-          <button data-page="settings"><span>⚙</span> Paramètres</button>
+            <span>⊞</span> <span class="nav-label">Bibliothèque d’addons</span></button
+          ><button data-page="copy"><span>⇄</span> <span class="nav-label">Cloner un profil</span></button
+          ><button data-page="proxy"><span>⇢</span> <span class="nav-label">Proxy</span></button
+          ><button data-page="backups"><span>↶</span> <span class="nav-label">Sauvegardes</span></button>
+          <button data-page="settings"><span>⚙</span> <span class="nav-label">Paramètres</span></button>
         </nav>
       </aside>
       <main>
         <header>
           <div class="breadcrumb">
-            Espace personnel <span>/</span>
+            <span id="crumb-root">Espace personnel</span> <span>/</span>
             <span id="crumb">Comptes & profils</span>
           </div>
-          <div class="header-actions"><button id="theme-toggle" type="button" aria-label="Passer en mode clair">☀ Mode clair</button><button id="logout" class="quiet">Déconnexion</button></div>
+          <div class="header-actions"><details id="lang-menu" class="lang-menu"><summary aria-label="Langue"><span class="lang-flag" id="lang-current-flag"></span><span id="lang-current-name" class="lang-current-name"></span><span class="lang-caret" aria-hidden="true">⌄</span></summary><div class="lang-list" id="lang-list" role="listbox"></div></details><button id="theme-toggle" type="button" aria-label="Passer en mode clair">☀ Mode clair</button><button id="logout" class="quiet">Déconnexion</button></div>
         </header>
         <div id="content" aria-live="polite">
           <p>Chargement du dashboard…</p>

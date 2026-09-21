@@ -1,21 +1,28 @@
+import { t } from "./i18n.js";
+
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
     (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
   );
 const labels = { trakt: "Trakt", simkl: "Simkl" };
-const formatDate = (value) => value ? new Date(value).toLocaleString("fr-FR") : "Jamais";
+const formatDate = (value) => value ? new Date(value).toLocaleString() : t("Jamais");
+// Inline Tuvora brand mark (amber play square), matching the account chooser.
+const TUVORA_LOGO = `<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="48" y="48" width="416" height="416" rx="52" fill="#f0b429"/><path fill="#141414" d="M204 164c-15 0-27 12-27 27v130c0 21 23 34 41 23l108-65c17-10 17-34 0-44l-108-65c-4-2-9-6-14-6z"/></svg>`;
 
 export async function renderConnections(container, context) {
-  const { api, accountId, profileId, openDialog, run, toast, onConnected } = context;
+  const { api, accountId, profileId, openDialog, run, toast, onConnected, provider } = context;
+  const isTuvora = provider === "tuvora";
+  const brand = isTuvora ? "Tuvora" : "Nuvio";
+  const services = isTuvora ? ["simkl"] : ["trakt", "simkl"];
   const data = await api(`connections?${new URLSearchParams({ accountId, profileId })}`);
-  container.innerHTML = `<h2>Sources de suivi</h2><p class="muted">Associez un compte de suivi à ce profil. Les statistiques combinent ensuite les historiques sans modifier les données d’origine.</p><div class="connection-grid">${["trakt", "simkl"].map((service) => card(service, data)).join("")}${nuvioSourceCard(data)}</div><p class="footer-note">Les connexions sont propres à ce profil. Les jetons d’accès restent chiffrés sur le serveur.</p>`;
+  container.innerHTML = `<h2>${esc(t("Sources de suivi"))}</h2><p class="muted">${esc(t("Associez un compte de suivi à ce profil. Les statistiques combinent ensuite les historiques sans modifier les données d’origine."))}</p><div class="connection-grid">${services.map((service) => card(service, data)).join("")}${historySourceCard(data, brand, isTuvora)}</div><p class="footer-note">${esc(t("Les connexions sont propres à ce profil. Les jetons d’accès restent chiffrés sur le serveur."))}</p>`;
   const nuvioToggle = container.querySelector("#stats-nuvio-toggle");
   if (nuvioToggle) nuvioToggle.onchange = () => run(async () => {
     const disabled = !nuvioToggle.checked;
     try {
       await api("connections/stats-source", { accountId, profileId, disabled });
-      toast(disabled ? "Historique Nuvio exclu des statistiques de ce profil." : "Historique Nuvio inclus dans les statistiques de ce profil.");
+      toast(disabled ? t("Historique {name} exclu des statistiques de ce profil.", { name: brand }) : t("Historique {name} inclus dans les statistiques de ce profil.", { name: brand }));
     } catch (error) {
       nuvioToggle.checked = !nuvioToggle.checked;
       throw error;
@@ -27,10 +34,10 @@ export async function renderConnections(container, context) {
   container.querySelectorAll("[data-disconnect]").forEach((button) => {
     button.onclick = () => {
       const service = button.dataset.disconnect;
-      if (!confirm(`Dissocier ${labels[service]} de ce profil ? L’historique distant ne sera pas supprimé.`)) return;
+      if (!confirm(t("Dissocier {service} de ce profil ? L’historique distant ne sera pas supprimé.", { service: labels[service] }))) return;
       run(async () => {
         await api("connections/disconnect", { accountId, profileId, service });
-        toast(`${labels[service]} dissocié de ce profil.`);
+        toast(t("{service} dissocié de ce profil.", { service: labels[service] }));
         await onConnected();
       });
     };
@@ -38,27 +45,27 @@ export async function renderConnections(container, context) {
   async function connect(service) {
     const pairing = await api("connections/start", { accountId, profileId, service });
     const url = new URL(pairing.verificationUrl);
-    if (!['https:', 'http:'].includes(url.protocol)) throw Error("Adresse d’autorisation invalide");
+    if (!['https:', 'http:'].includes(url.protocol)) throw Error(t("Adresse d’autorisation invalide"));
     const serviceLogo = service === "trakt" ? "/trakt.png" : "/simkl.webp";
     openDialog(`<div class="nuvio-pair tracker-pair tracker-pair-${service}">
-      <button class="nuvio-pair-close" type="button" data-close aria-label="Fermer">×</button>
+      <button class="nuvio-pair-close" type="button" data-close aria-label="${esc(t("Fermer"))}">×</button>
       <img class="nuvio-pair-logo tracker-pair-logo" src="${serviceLogo}" alt="${labels[service]}">
-      <h2>Associer un compte ${labels[service]}</h2>
-      <p class="nuvio-pair-intro">Ouvrez ${labels[service]}, connectez-vous à votre compte, puis saisissez ce code pour autoriser l’association.</p>
+      <h2>${esc(t("Associer un compte {service}", { service: labels[service] }))}</h2>
+      <p class="nuvio-pair-intro">${esc(t("Ouvrez {service}, connectez-vous à votre compte, puis saisissez ce code pour autoriser l’association.", { service: labels[service] }))}</p>
       <div class="nuvio-pair-code">
-        <span>Code d’association</span>
+        <span>${esc(t("Code d’association"))}</span>
         <strong>${esc(pairing.userCode)}</strong>
       </div>
       <a class="nuvio-pair-primary" href="${esc(url.href)}" target="_blank" rel="noreferrer">
-        <span aria-hidden="true">↗</span> Ouvrir le site ${labels[service]}
+        <span aria-hidden="true">↗</span> ${esc(t("Ouvrir le site {service}", { service: labels[service] }))}
       </a>
-      <ol class="nuvio-pair-steps" aria-label="Étapes d’association">
-        <li><span>1</span><strong>Ouvrir ${labels[service]}</strong></li>
-        <li><span>2</span><strong>Se connecter</strong></li>
-        <li><span>3</span><strong>Saisir le code</strong></li>
+      <ol class="nuvio-pair-steps" aria-label="${esc(t("Étapes d’association"))}">
+        <li><span>1</span><strong>${esc(t("Ouvrir {service}", { service: labels[service] }))}</strong></li>
+        <li><span>2</span><strong>${esc(t("Se connecter"))}</strong></li>
+        <li><span>3</span><strong>${esc(t("Saisir le code"))}</strong></li>
       </ol>
-      <button id="tracker-pair-check" class="nuvio-pair-secondary" type="button">J’ai terminé l’association</button>
-      <p id="tracker-pair-status" class="nuvio-pair-status" aria-live="polite"><span class="nuvio-pair-status-dot" aria-hidden="true"></span><span>En attente de l’autorisation…</span></p>
+      <button id="tracker-pair-check" class="nuvio-pair-secondary" type="button">${esc(t("J’ai terminé l’association"))}</button>
+      <p id="tracker-pair-status" class="nuvio-pair-status" aria-live="polite"><span class="nuvio-pair-status-dot" aria-hidden="true"></span><span>${esc(t("En attente de l’autorisation…"))}</span></p>
     </div>`);
     let timer,
       busy = false,
@@ -81,14 +88,14 @@ export async function renderConnections(container, context) {
         const result = await api("connections/poll", { id: pairing.id });
         if (result.status === "connected") {
           stop();
-          setStatus("Association confirmée.", "connected");
+          setStatus(t("Association confirmée."), "connected");
           dialog.close();
-          toast(`${labels[service]} est associé au profil.`);
+          toast(t("{service} est associé au profil.", { service: labels[service] }));
           await onConnected();
           return;
         }
         interval = Math.max(result.interval || interval / 1000, 5) * 1000;
-        setStatus("En attente de l’autorisation…");
+        setStatus(t("En attente de l’autorisation…"));
       } catch (error) {
         setStatus(error.message, "error");
         stop();
@@ -107,13 +114,19 @@ export async function renderConnections(container, context) {
   }
 }
 
-function nuvioSourceCard(data) {
+function historySourceCard(data, brand, isTuvora) {
   const included = !data.statsNuvioDisabled;
-  return `<article class="panel connection-card stats-source-card"><img class="connection-logo" src="/assets/nuvio_logo.png" alt="Logo Nuvio"><div><h3>Historique Nuvio</h3><p class="muted">Par défaut, l’historique de lecture Nuvio alimente les statistiques avec Trakt et Simkl. Désactive-le pour ne compter que Trakt et Simkl sur ce profil.</p><label class="stats-source-toggle"><input type="checkbox" id="stats-nuvio-toggle"${included ? " checked" : ""}><span>Inclure l’historique Nuvio</span></label></div></article>`;
+  const logo = isTuvora
+    ? `<span class="connection-logo connection-logo-svg">${TUVORA_LOGO}</span>`
+    : `<img class="connection-logo" src="/assets/nuvio_logo.png" alt="Logo Nuvio">`;
+  const description = isTuvora
+    ? t("Par défaut, l’historique de lecture Tuvora alimente les statistiques avec Simkl. Désactive-le pour ne compter que Simkl sur ce profil.")
+    : t("Par défaut, l’historique de lecture Nuvio alimente les statistiques avec Trakt et Simkl. Désactive-le pour ne compter que Trakt et Simkl sur ce profil.");
+  return `<article class="panel connection-card stats-source-card">${logo}<div><h3>${esc(t("Historique {name}", { name: brand }))}</h3><p class="muted">${esc(description)}</p><label class="stats-source-toggle"><input type="checkbox" id="stats-nuvio-toggle"${included ? " checked" : ""}><span>${esc(t("Inclure l’historique {name}", { name: brand }))}</span></label></div></article>`;
 }
 
 function card(service, data) {
   const connected = data.connections[service],
     configured = data.configured[service];
-  return `<article class="panel connection-card"><img class="connection-logo" src="/${service === "trakt" ? "trakt.png" : "simkl.webp"}" alt="Logo ${labels[service]}"><div><h3>${labels[service]}</h3>${connected.connected ? `<p class="connection-ok">● Associé</p><p class="muted">Dernière synchronisation : ${formatDate(connected.lastSync)}</p>${connected.lastError ? `<p class="error">${esc(connected.lastError)}</p>` : ""}<button data-disconnect="${service}">Dissocier</button>` : configured ? `<p class="muted">Importe l’historique de visionnage dans les statistiques de ce profil.</p><button class="primary" data-connect="${service}">Associer le compte</button>` : `<p class="muted">Ajoute les identifiants de l’application ${labels[service]} dans le menu Paramètres.</p><button disabled>Configuration requise</button>`}</div></article>`;
+  return `<article class="panel connection-card"><img class="connection-logo" src="/${service === "trakt" ? "trakt.png" : "simkl.webp"}" alt="Logo ${labels[service]}"><div><h3>${labels[service]}</h3>${connected.connected ? `<p class="connection-ok">● ${esc(t("Associé"))}</p><p class="muted">${esc(t("Dernière synchronisation :"))} ${formatDate(connected.lastSync)}</p>${connected.lastError ? `<p class="error">${esc(connected.lastError)}</p>` : ""}<button data-disconnect="${service}">${esc(t("Dissocier"))}</button>` : configured ? `<p class="muted">${esc(t("Importe l’historique de visionnage dans les statistiques de ce profil."))}</p><button class="primary" data-connect="${service}">${esc(t("Associer le compte"))}</button>` : `<p class="muted">${esc(t("Ajoute les identifiants de l’application {service} dans le menu Paramètres.", { service: labels[service] }))}</p><button disabled>${esc(t("Configuration requise"))}</button>`}</div></article>`;
 }

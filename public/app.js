@@ -2,6 +2,9 @@ import { renderPanelSettings } from "./panel-settings.js";
 import { renderActivity } from "./activity.js";
 import { renderStatistics } from "./statistics.js";
 import { renderConnections } from "./connections.js";
+import { renderIptv } from "./iptv.js";
+import { renderSports } from "./sports.js";
+import { initI18n, setLang, getLang, t, SUPPORTED_LANGS, LANG_NAMES } from "./i18n.js";
 import {
   officialSettingsItems,
   readSettingControl,
@@ -102,22 +105,17 @@ const hash = async (x) =>
     .join("");
 async function api(route, data) {
   const r = await fetch("/api/" + route, {
-    ...(data
-      ? {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        }
-      : {}),
+    headers: { "X-Lang": getLang(), ...(data ? { "Content-Type": "application/json" } : {}) },
+    ...(data ? { method: "POST", body: JSON.stringify(data) } : {}),
   });
   const b = await r.json();
   if (!r.ok) {
     if (r.status === 401 && !route.startsWith("pair")) login();
     if (r.status === 428 && route !== "setup") setup();
     throw Error(
-      b.error +
+      t(b.error) +
         (b.partial
-          ? `\nDéjà enregistrés : ${b.completed.join(", ")}. Une sauvegarde est disponible.`
+          ? `\n${t("Déjà enregistrés : {list}. Une sauvegarde est disponible.", { list: b.completed.join(", ") })}`
           : ""),
     );
   }
@@ -160,9 +158,43 @@ function accountOptions(id = accountId) {
     )
     .join("");
 }
+// Provider badge (icon + type name) shown at the right of each account entry.
+function accountTypeBadge(provider) {
+  const isTuvora = provider === "tuvora";
+  const icon = isTuvora
+    ? `<span class="acct-type-icon acct-type-icon-svg">${TUVORA_LOGO}</span>`
+    : `<img class="acct-type-icon" src="/assets/nuvio_logo.png" alt="">`;
+  return `<span class="acct-type acct-type-${isTuvora ? "tuvora" : "nuvio"}">${icon}<span class="acct-type-name">${isTuvora ? "Tuvora" : "Nuvio"}</span></span>`;
+}
+// Custom account selector: account name on the left, provider icon + type on
+// the right (a native <option> can render neither an inline SVG nor this layout).
+function accountMenu() {
+  const current = state.accounts.find((a) => a.id === accountId) || state.accounts[0];
+  const row = (a) =>
+    `<button type="button" role="option" data-account="${esc(a.id)}" aria-selected="${a.id === accountId}" class="acct-option"><span class="acct-option-name">${esc(a.name || a.email)}</span>${accountTypeBadge(a.provider)}</button>`;
+  return `<details class="acct-menu" id="account-menu"><summary aria-label="${esc(t("COMPTE NUVIO"))}"><span class="acct-current-name">${esc(current?.name || current?.email || "")}</span>${current ? accountTypeBadge(current.provider) : ""}<span class="acct-caret" aria-hidden="true">⌄</span></summary><div class="acct-list" role="listbox">${state.accounts.map(row).join("")}</div></details>`;
+}
+let accountOutsideHandler = null;
+function setupAccountMenu() {
+  const menu = $("#account-menu");
+  if (!menu) return;
+  menu.querySelectorAll("[data-account]").forEach((button) => {
+    button.onclick = () =>
+      run(async () => {
+        menu.open = false;
+        accountId = button.dataset.account;
+        await renderProfiles();
+      });
+  });
+  if (accountOutsideHandler) document.removeEventListener("pointerdown", accountOutsideHandler);
+  accountOutsideHandler = (event) => {
+    if (menu.open && !menu.contains(event.target)) menu.open = false;
+  };
+  document.addEventListener("pointerdown", accountOutsideHandler);
+}
 function renameAccount() {
   const selected = state.accounts.find(a => a.id === accountId);
-  openDialog(`<h2>Renommer le compte</h2><form id="rename-account-form" class="form"><label>Nom affiché<input name="name" maxlength="80" value="${esc(selected.name || selected.email)}" placeholder="${esc(selected.email)}" autocomplete="off"></label><p class="muted">Ce nom est utilisé dans le dashboard. Laisse le champ vide pour afficher à nouveau l’adresse e-mail.</p><div class="dialog-actions"><button type="button" data-close>Annuler</button><button class="primary">Enregistrer</button></div></form>`);
+  openDialog(`<h2>${esc(t("Renommer le compte"))}</h2><form id="rename-account-form" class="form"><label>${esc(t("Nom affiché"))}<input name="name" maxlength="80" value="${esc(selected.name || selected.email)}" placeholder="${esc(selected.email)}" autocomplete="off"></label><p class="muted">${esc(t("Ce nom est utilisé dans le dashboard. Laisse le champ vide pour afficher à nouveau l’adresse e-mail."))}</p><div class="dialog-actions"><button type="button" data-close>${esc(t("Annuler"))}</button><button class="primary">${esc(t("Enregistrer"))}</button></div></form>`);
   $("#rename-account-form").onsubmit = event => {
     event.preventDefault();
     const name = event.target.elements.name.value;
@@ -170,7 +202,7 @@ function renameAccount() {
       await api("accounts/rename", { accountId: selected.id, name });
       $("#dialog").close();
       await render();
-      toast("Nom du compte enregistré");
+      toast(t("Nom du compte enregistré"));
     });
   };
 }
@@ -178,7 +210,7 @@ function profileOptions(rows = profiles, id = profileId) {
   return rows
     .map(
       (p) =>
-        `<option value="${p.profile_index}" ${p.profile_index === Number(id) ? "selected" : ""}>${esc(p.name)} · Profil ${p.profile_index}</option>`,
+        `<option value="${p.profile_index}" ${p.profile_index === Number(id) ? "selected" : ""}>${esc(p.name)} · ${esc(t("Profil {n}", { n: p.profile_index }))}</option>`,
     )
     .join("");
 }
@@ -214,9 +246,69 @@ async function loadProfile() {
   );
   draft = structuredClone(current[tab]?.settings_json || {});
 }
+// Re-label the static chrome (nav, breadcrumb, header) for the active language.
+function applyChrome() {
+  $$("#nav button").forEach((b) => {
+    const label = b.querySelector(".nav-label");
+    if (label) label.textContent = t("nav." + b.dataset.page);
+  });
+  const root = $("#crumb-root");
+  if (root) root.textContent = t("header.root");
+  const logout = $("#logout");
+  if (logout) logout.textContent = t("header.logout");
+  window.i18nTheme = (light) => ({
+    text: t(light ? "header.themeDark" : "header.themeLight"),
+    aria: t(light ? "header.themeDarkAria" : "header.themeLightAria"),
+  });
+  window.__themeUpdate?.();
+  if ($("#lang-menu")) updateLangSummary();
+}
+// Inline SVG flags for the language menu (viewBox 0 0 640 480, styled via CSS).
+const LANG_FLAGS = {
+  fr: '<svg viewBox="0 0 640 480" aria-hidden="true"><path fill="#fff" d="M0 0h640v480H0z"/><path fill="#000091" d="M0 0h213.3v480H0z"/><path fill="#e1000f" d="M426.7 0H640v480H426.7z"/></svg>',
+  en: '<svg viewBox="0 0 640 480" aria-hidden="true"><path fill="#012169" d="M0 0h640v480H0z"/><path fill="#fff" d="m75 0 244 181L562 0h78v62L400 241l240 178v61h-80L320 301 81 480H0v-60l239-178L0 64V0z"/><path fill="#c8102e" d="m424 281 216 159v40L369 281zm-184 20 6 35L54 480H0zM640 0v3L391 191l2-44L590 0zM0 0l239 176h-60L0 42z"/><path fill="#fff" d="M241 0v480h160V0zM0 160v160h640V160z"/><path fill="#c8102e" d="M0 193v96h640v-96zM273 0v480h96V0z"/></svg>',
+  es: '<svg viewBox="0 0 640 480" aria-hidden="true"><path fill="#c60b1e" d="M0 0h640v480H0z"/><path fill="#ffc400" d="M0 120h640v240H0z"/></svg>',
+  de: '<svg viewBox="0 0 640 480" aria-hidden="true"><path fill="#fc0" d="M0 320h640v160H0z"/><path fill="#000" d="M0 0h640v160H0z"/><path fill="red" d="M0 160h640v160H0z"/></svg>',
+  it: '<svg viewBox="0 0 640 480" aria-hidden="true"><path fill="#fff" d="M0 0h640v480H0z"/><path fill="#009246" d="M0 0h213.3v480H0z"/><path fill="#ce2b37" d="M426.7 0H640v480H426.7z"/></svg>',
+};
+let langOutsideHandler = null;
+function updateLangSummary() {
+  const code = getLang();
+  const flag = $("#lang-current-flag");
+  if (flag) flag.innerHTML = LANG_FLAGS[code] || "";
+  const name = $("#lang-current-name");
+  if (name) name.textContent = LANG_NAMES[code];
+  const menu = $("#lang-menu");
+  if (menu) menu.querySelector("summary")?.setAttribute("aria-label", t("header.language"));
+  $$("#lang-list [data-lang]").forEach((b) =>
+    b.setAttribute("aria-selected", String(b.dataset.lang === code)),
+  );
+}
+function setupLangSelect() {
+  const menu = $("#lang-menu"), list = $("#lang-list");
+  if (!menu || !list) return;
+  list.innerHTML = SUPPORTED_LANGS.map(
+    (code) => `<button type="button" role="option" data-lang="${code}" class="lang-option"><span class="lang-flag">${LANG_FLAGS[code] || ""}</span><span>${esc(LANG_NAMES[code])}</span></button>`,
+  ).join("");
+  list.querySelectorAll("[data-lang]").forEach((button) => {
+    button.onclick = () =>
+      run(async () => {
+        menu.open = false;
+        await setLang(button.dataset.lang);
+        updateLangSummary();
+        await render();
+      });
+  });
+  updateLangSummary();
+  // Close the menu when clicking outside of it (single reusable handler).
+  if (langOutsideHandler) document.removeEventListener("pointerdown", langOutsideHandler);
+  langOutsideHandler = (event) => { if (menu.open && !menu.contains(event.target)) menu.open = false; };
+  document.addEventListener("pointerdown", langOutsideHandler);
+}
 const NUVIO_PAGES = ["profiles", "statistics", "proxy"];
 async function render() {
   await refreshState();
+  applyChrome();
   clearInterval(homeTimer);
   clearInterval(perfTimer);
   document.querySelector(".perf-tip")?.remove();
@@ -226,7 +318,7 @@ async function render() {
     b.style.display = allowed ? "" : "none";
   });
   if (!isAdmin && !NUVIO_PAGES.includes(page)) page = "profiles";
-  $("#crumb").textContent = labels[page];
+  $("#crumb").textContent = t("nav." + page);
   $$("#nav button").forEach((b) =>
     b.classList.toggle("active", b.dataset.page === page),
   );
@@ -255,9 +347,9 @@ const fmtUptime = (seconds) => {
     d = Math.floor(s / 86400),
     h = Math.floor((s % 86400) / 3600),
     m = Math.floor((s % 3600) / 60);
-  if (d) return `${d} j ${h} h`;
-  if (h) return `${h} h ${m} min`;
-  return `${m} min`;
+  if (d) return `${d} ${t("unit.d")} ${h} ${t("unit.h")}`;
+  if (h) return `${h} ${t("unit.h")} ${m} ${t("unit.min")}`;
+  return `${m} ${t("unit.min")}`;
 };
 // Material Design Icons (single-path SVG data) used on the home tiles.
 const HOME_ICONS = {
@@ -307,7 +399,7 @@ function perfChart(series, periodSeconds) {
       n < 2
         ? grid
         : `${grid}<polyline class="perf-line perf-ram" vector-effect="non-scaling-stroke" points="${poly((p) => p.rss, yRam)}"></polyline><polyline class="perf-line perf-cpu" vector-effect="non-scaling-stroke" points="${poly((p) => p.cpu, yCpu)}"></polyline>`;
-  return `<div class="perf-plot"><div class="perf-yaxis">${labels}</div><div class="perf-canvas"><svg class="perf-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Utilisation CPU et RAM dans le temps">${inner}</svg><div class="perf-cursor" hidden></div></div></div>${n < 2 ? '<p class="muted perf-hint">Pas encore assez de données sur cette période.</p>' : ""}`;
+  return `<div class="perf-plot"><div class="perf-yaxis">${labels}</div><div class="perf-canvas"><svg class="perf-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Utilisation CPU et RAM dans le temps">${inner}</svg><div class="perf-cursor" hidden></div></div></div>${n < 2 ? `<p class="muted perf-hint">${esc(t("perf.noData"))}</p>` : ""}`;
 }
 function bindPerfHover() {
   const canvas = $(".perf-canvas"),
@@ -348,19 +440,19 @@ const PERF_PERIODS = [
   ["43200", "12 heures"], ["86400", "1 jour"], ["172800", "2 jours"], ["604800", "1 semaine"],
 ];
 function homeSkeleton() {
-  const options = PERF_PERIODS.map(([v, l]) => `<option value="${v}"${v === "86400" ? " selected" : ""}>${l}</option>`).join("");
-  return `<h2 class="home-heading">Système</h2><section class="stats-metrics" id="home-system"></section>` +
-    `<div class="panel perf-panel"><div class="perf-head"><h3>Utilisation dans le temps</h3><div class="perf-legend"><span><i class="cpu"></i> CPU <b id="perf-cpu">—</b></span><span><i class="ram"></i> RAM <b id="perf-ram">—</b></span></div><select id="perf-period" class="perf-period" aria-label="Période affichée">${options}</select></div><div id="perf-host"><p class="muted perf-hint">Chargement…</p></div></div>` +
-    `<h2 class="home-heading">Réseau · proxy</h2><section class="stats-metrics" id="home-network"></section>` +
-    `<h2 class="home-heading">Instance</h2><section class="stats-metrics" id="home-instance"></section>` +
-    `<p class="footer-note">Le trafic est compté depuis le démarrage de l’instance et cumulé dans le volume de données. L’historique CPU/RAM est conservé une semaine.</p>`;
+  const options = PERF_PERIODS.map(([v]) => `<option value="${v}"${v === "86400" ? " selected" : ""}>${esc(t("period." + v))}</option>`).join("");
+  return `<h2 class="home-heading">${esc(t("home.section.system"))}</h2><section class="stats-metrics" id="home-system"></section>` +
+    `<div class="panel perf-panel"><div class="perf-head"><h3>${esc(t("perf.title"))}</h3><div class="perf-legend"><span><i class="cpu"></i> CPU <b id="perf-cpu">—</b></span><span><i class="ram"></i> RAM <b id="perf-ram">—</b></span></div><select id="perf-period" class="perf-period" aria-label="${esc(t("perf.title"))}">${options}</select></div><div id="perf-host"><p class="muted perf-hint">${esc(t("perf.loading"))}</p></div></div>` +
+    `<h2 class="home-heading">${esc(t("home.section.network"))}</h2><section class="stats-metrics" id="home-network"></section>` +
+    `<h2 class="home-heading">${esc(t("home.section.instance"))}</h2><section class="stats-metrics" id="home-instance"></section>` +
+    `<p class="footer-note">${esc(t("home.footer"))}</p>`;
 }
 function updateHomeTiles(d) {
   const system = [
-    homeMetric("Mémoire du process", fmtBytes(d.memory.rss), mdiIcon("memory")),
-    homeMetric("Mémoire système", fmtBytes(d.memory.used), mdiIcon("server")),
-    homeMetric("Processeur", `${Math.round(d.cpu.percent)} %`, mdiIcon("cpu")),
-    homeMetric("Uptime", fmtUptime(d.uptime), mdiIcon("clock")),
+    homeMetric(t("home.procMemory"), fmtBytes(d.memory.rss), mdiIcon("memory")),
+    homeMetric(t("home.sysMemory"), fmtBytes(d.memory.used), mdiIcon("server")),
+    homeMetric(t("home.cpu"), `${Math.round(d.cpu.percent)} %`, mdiIcon("cpu")),
+    homeMetric(t("home.uptime"), fmtUptime(d.uptime), mdiIcon("clock")),
   ].join("");
   const total = (d.bandwidth.direct || 0) + (d.bandwidth.warp || 0);
   const now = Date.now();
@@ -369,19 +461,19 @@ function updateHomeTiles(d) {
     rate = (total - lastBw.total) / ((now - lastBw.t) / 1000);
   lastBw = { total, t: now };
   const network = [
-    homeMetric("Débit en direct", rate == null ? "—" : `${fmtBytes(rate)}/s`, mdiIcon("speedometer")),
-    homeMetric("Proxy interne", fmtBytes(d.bandwidth.direct), mdiIcon("lan")),
-    homeMetric("Proxy externe", fmtBytes(d.bandwidth.warp), mdiIcon("earth")),
-    homeMetric("Trafic total", fmtBytes(total), mdiIcon("swap")),
+    homeMetric(t("home.liveRate"), rate == null ? "—" : `${fmtBytes(rate)}${t("unit.perSecond")}`, mdiIcon("speedometer")),
+    homeMetric(t("home.proxyInternal"), fmtBytes(d.bandwidth.direct), mdiIcon("lan")),
+    homeMetric(t("home.proxyExternal"), fmtBytes(d.bandwidth.warp), mdiIcon("earth")),
+    homeMetric(t("home.totalTraffic"), fmtBytes(total), mdiIcon("swap")),
   ].join("");
   const instance = [
-    homeMetric("Comptes Nuvio", d.accounts, mdiIcon("account")),
-    homeMetric("Profils", d.profiles, mdiIcon("accounts")),
-    homeMetric("Addons en bibliothèque", d.libraryAddons, mdiIcon("puzzle")),
-    homeMetric("Addons proxifiés", d.proxyAddons, mdiIcon("shuffle")),
-    homeMetric("Comptes Trakt", d.trakt, mdiIcon("trakt")),
-    homeMetric("Comptes Simkl", d.simkl, mdiIcon("simkl")),
-    homeMetric("Sauvegardes", d.backups, mdiIcon("database")),
+    homeMetric(t("home.nuvioAccounts"), d.accounts, mdiIcon("account")),
+    homeMetric(t("home.profiles"), d.profiles, mdiIcon("accounts")),
+    homeMetric(t("home.libraryAddons"), d.libraryAddons, mdiIcon("puzzle")),
+    homeMetric(t("home.proxyAddons"), d.proxyAddons, mdiIcon("shuffle")),
+    homeMetric(t("home.trakt"), d.trakt, mdiIcon("trakt")),
+    homeMetric(t("home.simkl"), d.simkl, mdiIcon("simkl")),
+    homeMetric(t("home.backups"), d.backups, mdiIcon("database")),
   ].join("");
   const set = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
   set("#home-system", system);
@@ -393,7 +485,7 @@ function updateHomeTiles(d) {
 async function renderHome() {
   const c = $("#content");
   lastBw = null;
-  c.innerHTML = heading("Accueil", "Vue d’ensemble de l’instance et de son activité.") + homeSkeleton();
+  c.innerHTML = heading(t("home.title"), t("home.subtitle")) + homeSkeleton();
   const loadTiles = async () => {
     let data;
     try { data = await api("overview"); } catch { return; }
@@ -425,7 +517,7 @@ async function renderHome() {
   }, 30000);
 }
 function emptyAccounts() {
-  return `<div class="empty"><div class="empty-symbol">▦</div><h2>Vos profils, au même endroit.</h2><p class="muted">Connectez un compte Nuvio pour retrouver ses profils, modifier les réglages TV et Mobile et leur attribuer vos addons.</p>${btn("＋ Connecter un compte", "connect", "primary")}<p class="footer-note">La connexion se valide sur le site officiel Nuvio.<br>Votre mot de passe reste sur Nuvio.</p></div>`;
+  return `<div class="empty"><div class="empty-symbol">▦</div><h2>${esc(t("Vos profils, au même endroit."))}</h2><p class="muted">${esc(t("Connectez un compte Nuvio pour retrouver ses profils, modifier les réglages TV et Mobile et leur attribuer vos addons."))}</p>${btn(t("＋ Connecter un compte"), "connect", "primary")}<p class="footer-note">${t("La connexion se valide sur le site officiel Nuvio.<br>Votre mot de passe reste sur Nuvio.")}</p></div>`;
 }
 function profileAvatar(profile) {
   let src = '';
@@ -440,27 +532,23 @@ async function renderProfiles() {
   const c = $("#content");
   const admin = state.viewer?.isAdmin === true;
   c.innerHTML = heading(
-    "Comptes & profils",
-    "Un espace pour chaque compte. Des réglages pour chaque écran.",
-    admin ? btn("＋ Connecter un compte", "connect", "primary") : "",
+    t("nav.profiles"),
+    t("Un espace pour chaque compte. Des réglages pour chaque écran."),
+    admin ? btn(t("＋ Connecter un compte"), "connect", "primary") : "",
   );
   const connectBtn = $("#connect");
-  if (connectBtn) connectBtn.onclick = () => run(pair);
+  if (connectBtn) connectBtn.onclick = () => connectAccount();
   if (!accountId) {
-    c.innerHTML = heading('Comptes & profils', 'Un espace pour chaque compte. Des réglages pour chaque écran.') + emptyAccounts();
-    $$("#connect").forEach((b) => (b.onclick = () => run(pair)));
+    c.innerHTML = heading(t("nav.profiles"), t("Un espace pour chaque compte. Des réglages pour chaque écran.")) + emptyAccounts();
+    $$("#connect").forEach((b) => (b.onclick = () => connectAccount()));
     return;
   }
   await loadProfiles();
-  c.innerHTML += `<div class="account-bar"><label>COMPTE NUVIO<select id="account">${accountOptions()}</select></label><div class="actions"><span class="badge neutral">${profiles.length} profils</span>${admin ? btn("Renommer le compte", "rename-account") : ""}${btn("＋ Nouveau profil", "create")}${admin ? btn("Déconnecter ce compte", "disconnect", "quiet") : ""}</div></div><div class="profile-grid">${profiles.map((p) => `<button class="profile-card ${p.profile_index === Number(profileId) ? "selected" : ""}" data-profile="${p.profile_index}">${profileAvatar(p)}<span class="profile-name">${esc(p.name)}</span><span class="muted">${p.profile_index === 1 ? "Profil principal" : "Profil " + p.profile_index} · TV & Mobile</span></button>`).join("")}</div><div id="editor"></div>`;
+  c.innerHTML += `<div class="account-bar"><label>${esc(t("COMPTE NUVIO"))}${accountMenu()}</label><div class="actions"><span class="badge neutral">${t("{n} profils", { n: profiles.length })}</span>${admin ? btn(t("Renommer le compte"), "rename-account") : ""}${btn(t("＋ Nouveau profil"), "create")}${admin ? btn(t("Déconnecter ce compte"), "disconnect", "quiet") : ""}</div></div><div class="profile-grid">${profiles.map((p) => `<button class="profile-card ${p.profile_index === Number(profileId) ? "selected" : ""}" data-profile="${p.profile_index}">${profileAvatar(p)}<span class="profile-name">${esc(p.name)}</span><span class="muted">${p.profile_index === 1 ? esc(t("Profil principal")) : esc(t("Profil {n}", { n: p.profile_index }))} · TV & Mobile</span></button>`).join("")}</div><div id="editor"></div>`;
   const connectAgain = $("#connect");
-  if (connectAgain) connectAgain.onclick = () => run(pair);
+  if (connectAgain) connectAgain.onclick = () => connectAccount();
   $$(".profile-avatar").forEach(image => image.addEventListener('error', () => image.remove(), {once:true}));
-  $("#account").onchange = (e) =>
-    run(async () => {
-      accountId = e.target.value;
-      await renderProfiles();
-    });
+  setupAccountMenu();
   $$("[data-profile]").forEach(
     (b) =>
       (b.onclick = () =>
@@ -475,7 +563,7 @@ async function renderProfiles() {
   const disconnectBtn = $("#disconnect");
   if (disconnectBtn) disconnectBtn.onclick = () => {
     openDialog(
-      `<h2>Déconnecter ce compte du dashboard ?</h2><p>Le compte et ses profils restent disponibles dans Nuvio.</p><div class="dialog-actions"><button data-close>Annuler</button><button id="remove-account" class="danger">Déconnecter</button></div>`,
+      `<h2>${esc(t("Déconnecter ce compte du dashboard ?"))}</h2><p>${esc(t("Le compte et ses profils restent disponibles dans Nuvio."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="remove-account" class="danger">${esc(t("Déconnecter"))}</button></div>`,
     );
     $("#remove-account").onclick = () =>
       run(async () => {
@@ -509,38 +597,48 @@ function writePath(obj, parts, value) {
 }
 function settingsContext() { return {addons:listValues(current.addons),plugins:listValues(current.plugins)}; }
 function field(item,i) { return settingControl(item,`data-field="${i}"`,settingsContext()); }
+function accountProvider(id = accountId) {
+  return state.accounts?.find((a) => a.id === id)?.provider || "nuvio";
+}
 function renderEditor() {
   const e = $("#editor");
-  e.innerHTML = `<div class="tabs">${[
+  const isTuvora = accountProvider() === "tuvora";
+  const tabs = [
     ["tv", "Paramètres ATV"],
     ["mobile", "Paramètres Mobile"],
     ["addons", "Addons"],
     ["plugins", "Plugins"],
+    ...(isTuvora ? [["iptv", "IPTV"], ["sports", "Guide des sports"]] : []),
     ["identity", "Profil"],
     ["connections", "Sources de suivi"],
-    ["history", "Historique Nuvio"],
-  ]
+    ["history", t("Historique {name}", { name: isTuvora ? "Tuvora" : "Nuvio" })],
+  ];
+  // A previously-selected Tuvora-only tab must not stick on a Nuvio profile.
+  if (!isTuvora && (tab === "iptv" || tab === "sports")) tab = "tv";
+  e.innerHTML = `<div class="tabs">${tabs
     .map(
       ([k, v]) =>
-        `<button data-tab="${k}" class="${tab === k ? "active" : ""}">${v}</button>`,
+        `<button data-tab="${k}" class="${tab === k ? "active" : ""}">${esc(t(v))}</button>`,
     )
     .join("")}</div><div id="settings"></div>`;
   $$("[data-tab]").forEach(
     (b) =>
       (b.onclick = () => {
         tab = b.dataset.tab;
-        if (!["history", "connections", "identity", "addons", "plugins"].includes(tab))
+        if (!["history", "connections", "identity", "addons", "plugins", "iptv", "sports"].includes(tab))
           draft = structuredClone(current[tab]?.settings_json || {});
         renderEditor();
       }),
   );
   if (tab === "history") return renderNuvioHistory();
-  if (tab === "connections") return renderConnections($("#settings"), {api,accountId,profileId,openDialog,run,toast,onConnected:renderEditor});
+  if (tab === "iptv") return void run(() => renderIptv($("#settings"), {api,accountId,profileId,openDialog,run,toast}));
+  if (tab === "sports") return void run(() => renderSports($("#settings"), {api,accountId,profileId,openDialog,run,toast}));
+  if (tab === "connections") return renderConnections($("#settings"), {api,accountId,profileId,openDialog,run,toast,onConnected:renderEditor,provider:accountProvider()});
   if (tab === "identity") return identityEditor();
   if (tab === "addons" || tab === "plugins") return integrationsEditor();
   const updated = current[tab].updated_at;
   $("#settings").innerHTML =
-    `<div class="settings-top"><input id="filter" name="nuvio-settings-filter" type="search" autocomplete="off" data-form-type="other" data-1p-ignore data-lpignore="true" placeholder="Rechercher dans les réglages…" aria-label="Rechercher un paramètre"><div class="actions">${btn("Recharger", "reload")}${btn("Voir les changements", "save", "primary")}</div></div><div class="muted">${updated ? "Synchronisé le " + esc(new Date(updated).toLocaleString("fr-FR")) : "Aucun paramètre synchronisé pour cette plateforme."}</div><div id="fields"></div><details class="panel raw-settings"><summary>Édition JSON avancée</summary><p class="muted">Conserve la structure et les types des paramètres Nuvio. Les champs inconnus sont préservés.</p><textarea id="raw" rows="12" aria-label="Paramètres JSON">${esc(JSON.stringify(draft, null, 2))}</textarea>${btn("Appliquer au brouillon", "raw-apply")}</details>`;
+    `<div class="settings-top"><input id="filter" name="nuvio-settings-filter" type="search" autocomplete="off" data-form-type="other" data-1p-ignore data-lpignore="true" placeholder="${esc(t("Rechercher dans les réglages…"))}" aria-label="${esc(t("Rechercher un paramètre"))}"><div class="actions">${btn(t("Recharger"), "reload")}${btn(t("Voir les changements"), "save", "primary")}</div></div><div class="muted">${updated ? esc(t("Synchronisé le {date}", { date: new Date(updated).toLocaleString(getLang()) })) : esc(t("Aucun paramètre synchronisé pour cette plateforme."))}</div><div id="fields"></div><details class="panel raw-settings"><summary>${esc(t("Édition JSON avancée"))}</summary><p class="muted">${esc(t("Conserve la structure et les types des paramètres Nuvio. Les champs inconnus sont préservés."))}</p><textarea id="raw" rows="12" aria-label="${esc(t("Paramètres JSON"))}">${esc(JSON.stringify(draft, null, 2))}</textarea>${btn(t("Appliquer au brouillon"), "raw-apply")}</details>`;
   renderFields();
   $("#filter").oninput = () => renderFields();
   $("#reload").onclick = () =>
@@ -552,10 +650,10 @@ function renderEditor() {
     run(async () => {
       const value = JSON.parse($("#raw").value);
       if (!value || typeof value !== "object" || Array.isArray(value))
-        throw Error("Objet JSON attendu");
+        throw Error(t("Objet JSON attendu"));
       draft = value;
       renderFields();
-      toast("Brouillon mis à jour. Aucun changement envoyé à Nuvio.");
+      toast(t("Brouillon mis à jour. Aucun changement envoyé à Nuvio."));
     });
   $("#save").onclick = () =>
     run(async () => {
@@ -576,7 +674,8 @@ function renderNuvioHistory() {
     ["library", "Bibliothèque"],
     ["watched", "Déjà vus"],
   ];
-  container.innerHTML = `<section class="nuvio-history"><div class="nuvio-history-heading"><div><h2>Historique Nuvio</h2><p class="muted">Consultez les contenus synchronisés par Nuvio pour ce profil.</p></div></div><div class="history-tabs" role="tablist" aria-label="Catégories de l’historique Nuvio">${historyTabs.map(([key, label]) => `<button type="button" role="tab" aria-selected="${historyTab === key}" data-history-tab="${key}" class="${historyTab === key ? "active" : ""}">${label}</button>`).join("")}</div><div id="history-content" role="tabpanel"></div></section>`;
+  const brand = accountProvider() === "tuvora" ? "Tuvora" : "Nuvio";
+  container.innerHTML = `<section class="nuvio-history"><div class="nuvio-history-heading"><div><h2>${esc(t("Historique {name}", { name: brand }))}</h2><p class="muted">${esc(t("Consultez les contenus synchronisés par {name} pour ce profil.", { name: brand }))}</p></div></div><div class="history-tabs" role="tablist" aria-label="${esc(t("Catégories de l’historique {name}", { name: brand }))}">${historyTabs.map(([key, label]) => `<button type="button" role="tab" aria-selected="${historyTab === key}" data-history-tab="${key}" class="${historyTab === key ? "active" : ""}">${esc(t(label))}</button>`).join("")}</div><div id="history-content" role="tabpanel"></div></section>`;
   $$('[data-history-tab]').forEach((button) => {
     button.onclick = () => {
       historyTab = button.dataset.historyTab;
@@ -604,7 +703,7 @@ function renderFields() {
       (item) => item.meta.feature + "." + item.meta.key,
     ),
   );
-  const query = $("#filter").value.trim().toLocaleLowerCase("fr");
+  const query = $("#filter").value.trim().toLocaleLowerCase(getLang());
   const sections = settingsSections[tab];
   const hasInternal = extra.length > 0;
   if (
@@ -622,13 +721,13 @@ function renderFields() {
       experimental: section.experimental,
     })),
     ...(hasInternal
-      ? [{ id: "internal", title: `Données internes (${extra.length})` }]
+      ? [{ id: "internal", title: `${t("Données internes")} (${extra.length})` }]
       : []),
   ];
-  const navigation = `<div class="settings-section-tabs" role="tablist" aria-label="Catégories de réglages">${sectionButtons
+  const navigation = `<div class="settings-section-tabs" role="tablist" aria-label="${esc(t("Catégories de réglages"))}">${sectionButtons
     .map(
       (section) =>
-        `<button role="tab" data-settings-section="${section.id}" aria-selected="${settingsSection[tab] === section.id}" class="${settingsSection[tab] === section.id ? "active" : ""}">${esc(section.title)}${section.experimental ? " · App" : ""}</button>`,
+        `<button role="tab" data-settings-section="${section.id}" aria-selected="${settingsSection[tab] === section.id}" class="${settingsSection[tab] === section.id ? "active" : ""}">${esc(t(section.title))}${section.experimental ? " · App" : ""}</button>`,
     )
     .join("")}</div>`;
 
@@ -639,16 +738,16 @@ function renderFields() {
       .filter(
         (item) =>
           !query ||
-          (human(item.label) + " " + item.path.join(" "))
-            .toLocaleLowerCase("fr")
+          (t(human(item.label)) + " " + item.path.join(" "))
+            .toLocaleLowerCase(getLang())
             .includes(query),
       );
-    content = `<div class="settings-section-heading"><div><span class="eyebrow">Hors interface officielle</span><h2>Données internes synchronisées</h2><p>Ces valeurs existent dans le profil mais ne correspondent à aucun contrôle actuel de nuvio.tv. Elles sont conservées pour ne pas perturber les applications.</p></div></div><div class="hint warning">Ne modifie ces données que si tu connais leur rôle. Certaines sont des états internes, des préférences anciennes ou des réglages propres à une version d’application.</div><details class="setting-group" ${openSettingGroups[tab].has("internal") ? "open" : ""} data-setting-group="internal"><summary><span>Données supplémentaires</span><span class="muted">${rows.length} valeur${rows.length > 1 ? "s" : ""}</span></summary>${rows
+    content = `<div class="settings-section-heading"><div><span class="eyebrow">${esc(t("Hors interface officielle"))}</span><h2>${esc(t("Données internes synchronisées"))}</h2><p>${esc(t("Ces valeurs existent dans le profil mais ne correspondent à aucun contrôle actuel de nuvio.tv. Elles sont conservées pour ne pas perturber les applications."))}</p></div></div><div class="hint warning">${esc(t("Ne modifie ces données que si tu connais leur rôle. Certaines sont des états internes, des préférences anciennes ou des réglages propres à une version d’application."))}</div><details class="setting-group" ${openSettingGroups[tab].has("internal") ? "open" : ""} data-setting-group="internal"><summary><span>${esc(t("Données supplémentaires"))}</span><span class="muted">${rows.length} ${esc(t(rows.length > 1 ? "valeurs" : "valeur"))}</span></summary>${rows
       .map(
         (item) =>
-          `<div class="setting-row"><div><strong>${esc(human(item.label))}</strong></div><div class="setting-input">${field(item, item.i)}</div></div>`,
+          `<div class="setting-row"><div><strong>${esc(t(human(item.label)))}</strong></div><div class="setting-input">${field(item, item.i)}</div></div>`,
       )
-      .join("") || '<div class="empty-inline">Aucune donnée correspondante.</div>'}</details>`;
+      .join("") || `<div class="empty-inline">${esc(t("Aucune donnée correspondante."))}</div>`}</details>`;
   } else {
     const section =
       sections.find((candidate) => candidate.id === settingsSection[tab]) ||
@@ -665,7 +764,7 @@ function renderFields() {
             (item) =>
               !query ||
               (
-                item.meta.title +
+                t(item.meta.title) +
                 " " +
                 settingDescription(item.meta) +
                 " " +
@@ -673,20 +772,20 @@ function renderFields() {
                 " " +
                 item.meta.key
               )
-                .toLocaleLowerCase("fr")
+                .toLocaleLowerCase(getLang())
                 .includes(query),
           );
         if (query && !rows.length) return "";
         const groupId = section.id + ":" + groupIndex;
-        return `<details class="setting-group" ${openSettingGroups[tab].has(groupId) ? "open" : ""} data-setting-group="${groupId}"><summary><span>${esc(group.title)}</span><span class="muted">${rows.length} réglage${rows.length > 1 ? "s" : ""}</span></summary><p class="setting-group-description">${esc(group.description)}</p>${rows
+        return `<details class="setting-group" ${openSettingGroups[tab].has(groupId) ? "open" : ""} data-setting-group="${groupId}"><summary><span>${esc(t(group.title))}</span><span class="muted">${rows.length} ${esc(t(rows.length > 1 ? "réglages" : "réglage"))}</span></summary><p class="setting-group-description">${esc(t(group.description))}</p>${rows
           .map((item) => {
             const description = settingDescription(item.meta);
-            return `<div class="setting-row${item.present ? "" : " setting-default"}"><div><strong>${esc(item.meta.title)}</strong>${description ? `<div class="muted">${esc(description)}</div>` : ""}${item.present ? "" : '<span class="default-badge">Valeur par défaut</span>'}</div><div class="setting-input">${field(item, item.i)}</div></div>`;
+            return `<div class="setting-row${item.present ? "" : " setting-default"}"><div><strong>${esc(t(item.meta.title))}</strong>${description ? `<div class="muted">${esc(description)}</div>` : ""}${item.present ? "" : `<span class="default-badge">${esc(t("Valeur par défaut"))}</span>`}</div><div class="setting-input">${field(item, item.i)}</div></div>`;
           })
           .join("")}</details>`;
       })
       .join("");
-    content = `<div class="settings-section-heading"><div><h2>${esc(section.title)}</h2><p>${esc(section.description)}</p></div><span class="section-count">${section.groups.reduce((count, group) => count + group.keys.length, 0)} réglages</span></div>${section.experimental ? '<div class="hint warning">Ces réglages existent dans le code officiel de l’application Mobile mais ne sont pas exposés sur nuvio.tv. Leur utilisation reste expérimentale.</div>' : ""}${groupMarkup || '<div class="empty-inline">Aucun paramètre ne correspond à cette recherche dans cet onglet.</div>'}`;
+    content = `<div class="settings-section-heading"><div><h2>${esc(t(section.title))}</h2><p>${esc(t(section.description))}</p></div><span class="section-count">${section.groups.reduce((count, group) => count + group.keys.length, 0)} ${esc(t("réglages"))}</span></div>${section.experimental ? `<div class="hint warning">${esc(t("Ces réglages existent dans le code officiel de l’application Mobile mais ne sont pas exposés sur nuvio.tv. Leur utilisation reste expérimentale."))}</div>` : ""}${groupMarkup || `<div class="empty-inline">${esc(t("Aucun paramètre ne correspond à cette recherche dans cet onglet."))}</div>`}`;
   }
 
   $("#fields").innerHTML = navigation + content;
@@ -733,15 +832,15 @@ function integrationsEditor() {
         kind === "addons" ? "uses_primary_addons" : "uses_primary_plugins"
       ];
   $("#settings").innerHTML =
-    `<div class="settings-top"><p class="muted">${rows.length} ${kind} · ordre de synchronisation</p><div class="actions">${btn("＋ Ajouter", "add-integration")}${btn("Voir les changements", "save-list", "primary")}</div></div>${inherited ? '<div class="hint warning">Ce profil utilise la liste du profil principal. Modifie l’héritage dans l’onglet Profil pour gérer sa propre liste.</div>' : ""}<div id="integration-list"></div>`;
+    `<div class="settings-top"><p class="muted">${rows.length} ${kind} · ${esc(t("ordre de synchronisation"))}</p><div class="actions">${btn(t("＋ Ajouter"), "add-integration")}${btn(t("Voir les changements"), "save-list", "primary")}</div></div>${inherited ? `<div class="hint warning">${esc(t("Ce profil utilise la liste du profil principal. Modifie l’héritage dans l’onglet Profil pour gérer sa propre liste."))}</div>` : ""}<div id="integration-list"></div>`;
   function display() {
     $("#integration-list").innerHTML =
       rows
         .map(
           (r, i) =>
-            `<div class="addon"><div class="addon-top"><label class="check-label"><input type="checkbox" data-enabled="${i}" ${r.enabled ? "checked" : ""} ${inherited ? "disabled" : ""}>${esc(r.name || kind)}</label><div class="actions"><button data-up="${i}" ${i === 0 || inherited ? "disabled" : ""} aria-label="Monter ${esc(r.name)}">↑</button><button data-down="${i}" ${i === rows.length - 1 || inherited ? "disabled" : ""} aria-label="Descendre ${esc(r.name)}">↓</button><button data-remove="${i}" ${inherited ? "disabled" : ""}>Retirer</button></div></div><p class="url">${esc(r.url)}</p></div>`,
+            `<div class="addon"><div class="addon-top"><label class="check-label"><input type="checkbox" data-enabled="${i}" ${r.enabled ? "checked" : ""} ${inherited ? "disabled" : ""}>${esc(r.name || kind)}</label><div class="actions"><button data-up="${i}" ${i === 0 || inherited ? "disabled" : ""} aria-label="${esc(t("Monter {name}", { name: r.name }))}">↑</button><button data-down="${i}" ${i === rows.length - 1 || inherited ? "disabled" : ""} aria-label="${esc(t("Descendre {name}", { name: r.name }))}">↓</button><button data-remove="${i}" ${inherited ? "disabled" : ""}>${esc(t("Retirer"))}</button></div></div><p class="url">${esc(r.url)}</p></div>`,
         )
-        .join("") || '<p class="empty-inline">Aucune intégration.</p>';
+        .join("") || `<p class="empty-inline">${esc(t("Aucune intégration."))}</p>`;
     $$("[data-enabled]").forEach(
       (el) =>
         (el.onchange = () =>
@@ -776,7 +875,7 @@ function integrationsEditor() {
   $("#add-integration").disabled = inherited;
   $("#add-integration").onclick = () => {
     openDialog(
-      `<h2>Ajouter un ${kind === "addons" ? "addon" : "plugin"}</h2><form id="integration-form" class="form"><label>Nom<input name="name" required></label><label>URL<input name="url" type="url" required placeholder="https://…"></label>${kind === "plugins" ? '<label>Type de dépôt<select name="repo_type"><option>NUVIO_JS</option><option>EXTERNAL_DEX</option></select></label>' : ""}<div class="dialog-actions"><button type="button" data-close>Annuler</button><button class="primary">Ajouter au brouillon</button></div></form>`,
+      `<h2>${kind === "addons" ? esc(t("Ajouter un addon")) : esc(t("Ajouter un plugin"))}</h2><form id="integration-form" class="form"><label>${esc(t("Nom"))}<input name="name" required></label><label>URL<input name="url" type="url" required placeholder="https://…"></label>${kind === "plugins" ? `<label>${esc(t("Type de dépôt"))}<select name="repo_type"><option>NUVIO_JS</option><option>EXTERNAL_DEX</option></select></label>` : ""}<div class="dialog-actions"><button type="button" data-close>${esc(t("Annuler"))}</button><button class="primary">${esc(t("Ajouter au brouillon"))}</button></div></form>`,
     );
     $("#integration-form").onsubmit = (e) => {
       e.preventDefault();
@@ -805,39 +904,39 @@ function identityEditor() {
     profileColor = /^#[0-9a-f]{6}$/i.test(p.avatar_color_hex || "") ? p.avatar_color_hex : "#1E88E5";
   let selectedAvatarId = p.avatar_id || "",
     xperienceAvatars = [];
-  const nuvioAvatars = avatars.map(avatar => `<button type="button" data-avatar-id="${esc(avatar.id)}" data-avatar-url="${esc(avatar.imageUrl)}" class="avatar-choice ${avatar.id === selectedAvatarId ? "selected" : ""}" title="${esc(avatar.displayName)}" aria-label="Choisir ${esc(avatar.displayName)}"><img src="${esc(avatar.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer"></button>`).join("") || '<p class="muted">Le catalogue d’avatars Nuvio est indisponible.</p>';
+  const nuvioAvatars = avatars.map(avatar => `<button type="button" data-avatar-id="${esc(avatar.id)}" data-avatar-url="${esc(avatar.imageUrl)}" class="avatar-choice ${avatar.id === selectedAvatarId ? "selected" : ""}" title="${esc(avatar.displayName)}" aria-label="${esc(t("Choisir {name}", { name: avatar.displayName }))}"><img src="${esc(avatar.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer"></button>`).join("") || `<p class="muted">${esc(t("Le catalogue d’avatars Nuvio est indisponible."))}</p>`;
   $("#settings").innerHTML = `
     <form id="identity-form" class="panel form">
-      <h2>Identité et héritage</h2>
+      <h2>${esc(t("Identité et héritage"))}</h2>
       <div class="identity-customization">
-        <div id="identity-avatar-preview" class="identity-avatar-preview"><span>${esc(p.name.slice(0, 1))}</span><img alt="Aperçu de l’image du profil" referrerpolicy="no-referrer"></div>
+        <div id="identity-avatar-preview" class="identity-avatar-preview"><span>${esc(p.name.slice(0, 1))}</span><img alt="${esc(t("Aperçu de l’image du profil"))}" referrerpolicy="no-referrer"></div>
         <div class="form">
-          <label>Nom du profil<input name="name" required value="${esc(p.name)}"></label>
-          <label>Couleur du profil<div class="profile-color-control"><input name="color" type="color" value="${esc(profileColor)}"><output>${esc(profileColor.toUpperCase())}</output></div></label>
-          <div class="profile-color-swatches" aria-label="Couleurs Nuvio">${colors.map(color => `<button type="button" data-profile-color="${color}" aria-label="Choisir la couleur ${color}" aria-pressed="false"></button>`).join("")}</div>
+          <label>${esc(t("Nom du profil"))}<input name="name" required value="${esc(p.name)}"></label>
+          <label>${esc(t("Couleur du profil"))}<div class="profile-color-control"><input name="color" type="color" value="${esc(profileColor)}"><output>${esc(profileColor.toUpperCase())}</output></div></label>
+          <div class="profile-color-swatches" aria-label="${esc(t("Couleurs Nuvio"))}">${colors.map(color => `<button type="button" data-profile-color="${color}" aria-label="${esc(t("Choisir la couleur {color}", { color }))}" aria-pressed="false"></button>`).join("")}</div>
         </div>
       </div>
       <fieldset class="profile-avatar-fieldset">
-        <legend>Image du profil</legend>
-        <h3>Avatars Nuvio</h3>
+        <legend>${esc(t("Image du profil"))}</legend>
+        <h3>${esc(t("Avatars Nuvio"))}</h3>
         <div class="avatar-gallery">${nuvioAvatars}</div>
         <div class="xperience-avatar-heading">
-          <h3>Avatars personnalisés Xperience</h3>
-          <p class="avatar-source-note">Source des images : <a href="https://xperience-app.com/avatars" target="_blank" rel="noopener noreferrer">galerie Xperience ↗</a>. Les fichiers restent hébergés par Xperience.</p>
+          <h3>${esc(t("Avatars personnalisés Xperience"))}</h3>
+          <p class="avatar-source-note">${t("Source des images : {link}. Les fichiers restent hébergés par Xperience.", { link: `<a href="https://xperience-app.com/avatars" target="_blank" rel="noopener noreferrer">${esc(t("galerie Xperience ↗"))}</a>` })}</p>
         </div>
         <div class="xperience-avatar-tools">
-          <label>Catégorie<select id="xperience-category" disabled><option>Chargement…</option></select></label>
-          <label>Rechercher<input id="xperience-search" type="search" placeholder="Nom d’un avatar…" disabled></label>
+          <label>${esc(t("Catégorie"))}<select id="xperience-category" disabled><option>${esc(t("Chargement…"))}</option></select></label>
+          <label>${esc(t("Rechercher"))}<input id="xperience-search" type="search" placeholder="${esc(t("Nom d’un avatar…"))}" disabled></label>
         </div>
-        <p id="xperience-avatar-count" class="muted">Chargement du catalogue Xperience…</p>
+        <p id="xperience-avatar-count" class="muted">${esc(t("Chargement du catalogue Xperience…"))}</p>
         <div id="xperience-avatar-gallery" class="avatar-gallery xperience-avatar-gallery"></div>
-        <label>URL d’une image personnalisée<input name="avatarUrl" type="url" placeholder="https://…" value="${esc(p.avatar_url || "")}"></label>
-        <div><button type="button" id="clear-avatar" class="quiet">Retirer l’image</button></div>
+        <label>${esc(t("URL d’une image personnalisée"))}<input name="avatarUrl" type="url" placeholder="https://…" value="${esc(p.avatar_url || "")}"></label>
+        <div><button type="button" id="clear-avatar" class="quiet">${esc(t("Retirer l’image"))}</button></div>
       </fieldset>
-      <label class="check-label"><input name="addons" type="checkbox" ${p.uses_primary_addons ? "checked" : ""} ${profileId === 1 ? "disabled" : ""}>Utiliser les addons du profil principal</label>
-      <label class="check-label"><input name="plugins" type="checkbox" ${p.uses_primary_plugins ? "checked" : ""} ${profileId === 1 ? "disabled" : ""}>Utiliser les plugins du profil principal</label>
-      <div>${btn("Enregistrer le profil", "", "primary")}</div>
-      <p class="footer-note">Une sauvegarde du compte est créée avant l’enregistrement.</p>
+      <label class="check-label"><input name="addons" type="checkbox" ${p.uses_primary_addons ? "checked" : ""} ${profileId === 1 ? "disabled" : ""}>${esc(t("Utiliser les addons du profil principal"))}</label>
+      <label class="check-label"><input name="plugins" type="checkbox" ${p.uses_primary_plugins ? "checked" : ""} ${profileId === 1 ? "disabled" : ""}>${esc(t("Utiliser les plugins du profil principal"))}</label>
+      <div>${btn(t("Enregistrer le profil"), "", "primary")}</div>
+      <p class="footer-note">${esc(t("Une sauvegarde du compte est créée avant l’enregistrement."))}</p>
     </form>`;
   const form = $("#identity-form"),
     colorInput = form.elements.color,
@@ -907,11 +1006,11 @@ function identityEditor() {
         (category === "__all__" || avatar.category === category) &&
         (!query || `${avatar.name} ${avatar.category}`.toLocaleLowerCase("fr").includes(query)),
       );
-    xperienceCount.textContent = `${matching.length} avatar${matching.length > 1 ? "s" : ""}`;
+    xperienceCount.textContent = t("{n} avatars", { n: matching.length });
     xperienceGallery.innerHTML = matching.map((avatar) => {
       const name = avatarName(avatar);
-      return `<button type="button" data-xperience-url="${esc(avatar.url)}" class="avatar-choice" title="${esc(name)}" aria-label="Choisir ${esc(name)}"><img src="${esc(avatar.url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></button>`;
-    }).join("") || '<p class="muted">Aucun avatar dans cette sélection.</p>';
+      return `<button type="button" data-xperience-url="${esc(avatar.url)}" class="avatar-choice" title="${esc(name)}" aria-label="${esc(t("Choisir {name}", { name }))}"><img src="${esc(avatar.url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></button>`;
+    }).join("") || `<p class="muted">${esc(t("Aucun avatar dans cette sélection."))}</p>`;
     $$('[data-xperience-url]').forEach((button) => button.onclick = () => {
       selectedAvatarId = "";
       urlInput.value = button.dataset.xperienceUrl;
@@ -924,7 +1023,7 @@ function identityEditor() {
     xperienceAvatars = result.avatars || [];
     const categories = result.categories || [],
       currentXperienceAvatar = xperienceAvatars.find((avatar) => validImageUrl(avatar.url) === validImageUrl(urlInput.value));
-    xperienceCategory.innerHTML = `<option value="__all__">Toutes les catégories</option>${categories.map((category) => `<option value="${esc(category)}">${esc(category)} (${xperienceAvatars.filter((avatar) => avatar.category === category).length})</option>`).join("")}`;
+    xperienceCategory.innerHTML = `<option value="__all__">${esc(t("Toutes les catégories"))}</option>${categories.map((category) => `<option value="${esc(category)}">${esc(category)} (${xperienceAvatars.filter((avatar) => avatar.category === category).length})</option>`).join("")}`;
     xperienceCategory.value = currentXperienceAvatar?.category || categories[0] || "__all__";
     xperienceCategory.disabled = false;
     xperienceSearch.disabled = false;
@@ -933,7 +1032,7 @@ function identityEditor() {
     renderXperienceAvatars();
   }).catch((error) => {
     if (!form.isConnected) return;
-    xperienceCount.textContent = `Catalogue Xperience indisponible : ${error.message}`;
+    xperienceCount.textContent = t("Catalogue Xperience indisponible : {error}", { error: error.message });
   });
   $("#identity-form").onsubmit = (e) => {
     e.preventDefault();
@@ -949,14 +1048,14 @@ function identityEditor() {
         inheritAddons: f.elements.addons.checked,
         inheritPlugins: f.elements.plugins.checked,
       });
-      toast("Profil enregistré");
+      toast(t("Profil enregistré"));
       await renderProfiles();
     });
   };
 }
 function createProfile() {
   openDialog(
-    `<h2>Nouveau profil</h2><form id="new-profile" class="form"><label>Nom<input name="name" required></label><div class="dialog-actions"><button type="button" data-close>Annuler</button><button class="primary">Créer dans Nuvio</button></div></form>`,
+    `<h2>${esc(t("Nouveau profil"))}</h2><form id="new-profile" class="form"><label>${esc(t("Nom"))}<input name="name" required></label><div class="dialog-actions"><button type="button" data-close>${esc(t("Annuler"))}</button><button class="primary">${esc(t("Créer dans Nuvio"))}</button></div></form>`,
   );
   $("#new-profile").onsubmit = (e) => {
     e.preventDefault();
@@ -974,9 +1073,9 @@ const PLATFORM_LABELS = { tv: "TV", mobile: "Mobile" };
 const LIST_LABELS = { addons: "Addons", plugins: "Plugins" };
 // Turns a raw diff value into readable French for the settings view.
 const friendlyValue = (x) => {
-  if (x === true) return "Activé";
-  if (x === false) return "Désactivé";
-  if (x === null || x === undefined || x === "") return "Absent";
+  if (x === true) return t("Activé");
+  if (x === false) return t("Désactivé");
+  if (x === null || x === undefined || x === "") return t("Absent");
   if (typeof x === "string" || typeof x === "number") return String(x);
   return JSON.stringify(x);
 };
@@ -991,23 +1090,23 @@ function diffList(before, after) {
     const prev = bByUrl.get(item.url),
       name = item.name || item.url;
     if (!prev) {
-      rows.push({ tone: "add", badge: "Ajouté", name });
+      rows.push({ tone: "add", badge: t("Ajouté"), name });
       continue;
     }
     const notes = [];
     if ((prev.name || "") !== (item.name || ""))
-      notes.push(`renommé « ${prev.name || "—"} » → « ${item.name || "—"} »`);
+      notes.push(t("renommé « {before} » → « {after} »", { before: prev.name || "—", after: item.name || "—" }));
     if ((prev.enabled !== false) !== (item.enabled !== false))
-      notes.push(item.enabled !== false ? "activé" : "désactivé");
-    if (notes.length) rows.push({ tone: "mod", badge: "Modifié", name, note: notes.join(" · ") });
+      notes.push(item.enabled !== false ? t("activé") : t("désactivé"));
+    if (notes.length) rows.push({ tone: "mod", badge: t("Modifié"), name, note: notes.join(" · ") });
   }
   for (const item of b)
-    if (!aByUrl.has(item.url)) rows.push({ tone: "del", badge: "Retiré", name: item.name || item.url });
+    if (!aByUrl.has(item.url)) rows.push({ tone: "del", badge: t("Retiré"), name: item.name || item.url });
   const common = (list, other) => list.map((x) => x.url).filter((url) => other.has(url));
   const bOrder = common(b, aByUrl),
     aOrder = common(a, bByUrl);
   if (bOrder.length === aOrder.length && bOrder.some((url, i) => url !== aOrder[i]))
-    rows.push({ tone: "mod", badge: "Ordre", name: "Ordre de la liste modifié" });
+    rows.push({ tone: "mod", badge: t("Ordre"), name: t("Ordre de la liste modifié") });
   return rows;
 }
 // Renders the whole diff grouped by section, readable instead of raw JSON.
@@ -1021,11 +1120,11 @@ function renderDiff(diff) {
     }
     const secret = /key|token|password|secret/i.test(d.path.join(".")),
       platform = PLATFORM_LABELS[d.path[0]],
-      label = (platform ? [platform, ...d.path.slice(1).map(human)] : d.path.map(human)).join(" › ");
+      label = (platform ? [platform, ...d.path.slice(1).map((s) => t(human(s)))] : d.path.map((s) => t(human(s)))).join(" › ");
     settings.push({
       label,
-      before: secret ? "Valeur masquée" : friendlyValue(d.before),
-      after: secret ? "Valeur masquée" : friendlyValue(d.after),
+      before: secret ? t("Valeur masquée") : friendlyValue(d.before),
+      after: secret ? t("Valeur masquée") : friendlyValue(d.after),
     });
   }
   let html = lists
@@ -1036,11 +1135,11 @@ function renderDiff(diff) {
             (it) =>
               `<div class="diff-item"><span class="badge diff-badge ${it.tone}">${esc(it.badge)}</span><span class="diff-item-name">${esc(it.name)}</span>${it.note ? `<span class="muted diff-item-note">${esc(it.note)}</span>` : ""}</div>`,
           )
-          .join("") || '<div class="diff-item muted">Aucun changement</div>'}</div>`,
+          .join("") || `<div class="diff-item muted">${esc(t("Aucun changement"))}</div>`}</div>`,
     )
     .join("");
   if (settings.length)
-    html += `<div class="diff-group"><div class="diff-group-title">Paramètres</div>${settings
+    html += `<div class="diff-group"><div class="diff-group-title">${esc(t("Paramètres"))}</div>${settings
       .map(
         (r) =>
           `<div class="diff-row"><div class="diff-label">${esc(r.label)}</div><div class="diff-values"><div class="old">− ${esc(r.before)}</div><div class="new">+ ${esc(r.after)}</div></div></div>`,
@@ -1050,9 +1149,9 @@ function renderDiff(diff) {
 }
 async function preview(data) {
   const result = await api("preview", data);
-  if (!result.count) return toast("Aucune modification à appliquer.");
+  if (!result.count) return toast(t("Aucune modification à appliquer."));
   openDialog(
-    `<h2>${result.count} modification${result.count > 1 ? "s" : ""} à vérifier</h2><p class="muted">Une sauvegarde du compte cible sera créée avant l’enregistrement.</p><div class="diff">${renderDiff(result.diff)}</div><div id="apply-error"></div><div class="dialog-actions"><button data-close>Annuler</button><button id="apply" class="primary">Enregistrer dans Nuvio</button></div>`,
+    `<h2>${esc(t(result.count > 1 ? "{n} modifications à vérifier" : "{n} modification à vérifier", { n: result.count }))}</h2><p class="muted">${esc(t("Une sauvegarde du compte cible sera créée avant l’enregistrement."))}</p><div class="diff">${renderDiff(result.diff)}</div><div id="apply-error"></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="apply" class="primary">${esc(t("Enregistrer dans Nuvio"))}</button></div>`,
   );
   $("#apply").onclick = async () => {
     const button = $("#apply");
@@ -1060,7 +1159,7 @@ async function preview(data) {
     try {
       await api("apply", { id: result.id });
       $("#dialog").close();
-      toast("Modifications enregistrées. Sauvegarde disponible.");
+      toast(t("Modifications enregistrées. Sauvegarde disponible."));
       await render();
     } catch (e) {
       $("#apply-error").innerHTML = `<p class="error">${esc(e.message)}</p>`;
@@ -1074,15 +1173,15 @@ function renderLibrary() {
       const url = new URL(addon.logo);
       if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) source = url.href;
     } catch {}
-    return `<span class="addon-logo"><span>${esc((addon.name || "A").slice(0, 1).toUpperCase())}</span>${source ? `<img src="${esc(source)}" alt="Logo de ${esc(addon.name)}" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
+    return `<span class="addon-logo"><span>${esc((addon.name || "A").slice(0, 1).toUpperCase())}</span>${source ? `<img src="${esc(source)}" alt="${esc(t("Logo de {name}", { name: addon.name }))}" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
   };
   $("#content").innerHTML =
     heading(
-      "Bibliothèque d’addons",
-      "Ajoutez une source une fois, puis attribuez-la aux profils de votre choix.",
-      btn("＋ Ajouter un addon", "new-addon", "primary"),
+      t("nav.library"),
+      t("Ajoutez une source une fois, puis attribuez-la aux profils de votre choix."),
+      btn(t("＋ Ajouter un addon"), "new-addon", "primary"),
     ) +
-    `<div class="list">${state.library.map((a) => `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="actions"><button data-edit="${a.id}">Modifier</button><button data-assign="${a.id}" class="primary">Attribuer à un profil</button><button data-delete="${a.id}" class="quiet">Retirer</button></div></div></article>`).join("") || '<div class="empty"><div class="empty-symbol">⊞</div><h2>Votre catalogue commence ici.</h2><p class="muted">Ajoutez l’URL du manifest d’un addon. Son attribution aux profils reste manuelle.</p></div>'}</div>`;
+    `<div class="list">${state.library.map((a) => `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></article>`).join("") || `<div class="empty"><div class="empty-symbol">⊞</div><h2>${esc(t("Votre catalogue commence ici."))}</h2><p class="muted">${esc(t("Ajoutez l’URL du manifest d’un addon. Son attribution aux profils reste manuelle."))}</p></div>`}</div>`;
   $$(".addon-logo img").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
   if (state.library.some((item) => !Object.hasOwn(item, "logo")))
     api("library/refresh-logos", {}).then((result) => {
@@ -1105,14 +1204,14 @@ function renderLibrary() {
           await api("library/remove", { id: b.dataset.delete });
           await render();
           toast(
-            "Retiré du catalogue. Les installations Nuvio restent en place.",
+            t("Retiré du catalogue. Les installations Nuvio restent en place."),
           );
         })),
   );
 }
 function addonForm(a = {}) {
   openDialog(
-    `<h2>${a.id ? "Modifier" : "Ajouter"} un addon</h2><form id="addon-form" class="form"><label>Nom<input name="name" required value="${esc(a.name)}" placeholder="Mon addon"></label><label>URL du manifest<input name="url" required value="${esc(a.url)}" placeholder="https://…/manifest.json"></label><p class="muted">Le catalogue conserve l’URL de configuration. Aucun profil n’est modifié à cette étape.</p><div class="dialog-actions"><button type="button" data-close>Annuler</button><button class="primary">Enregistrer</button></div></form>`,
+    `<h2>${a.id ? esc(t("Modifier un addon")) : esc(t("Ajouter un addon"))}</h2><form id="addon-form" class="form"><label>${esc(t("Nom"))}<input name="name" required value="${esc(a.name)}" placeholder="${esc(t("Mon addon"))}"></label><label>${esc(t("URL du manifest"))}<input name="url" required value="${esc(a.url)}" placeholder="https://…/manifest.json"></label><p class="muted">${esc(t("Le catalogue conserve l’URL de configuration. Aucun profil n’est modifié à cette étape."))}</p><div class="dialog-actions"><button type="button" data-close>${esc(t("Annuler"))}</button><button class="primary">${esc(t("Enregistrer"))}</button></div></form>`,
   );
   $("#addon-form").onsubmit = (e) => {
     e.preventDefault();
@@ -1127,10 +1226,10 @@ function addonForm(a = {}) {
   };
 }
 async function assign(id) {
-  if (!accountId) return toast("Connecte d’abord un compte Nuvio.");
+  if (!accountId) return toast(t("Connecte d’abord un compte Nuvio."));
   await loadProfiles();
   openDialog(
-    `<h2>Attribuer l’addon</h2><div class="form"><label>Compte<select id="assign-account">${accountOptions()}</select></label><label>Profil<select id="assign-profile">${profileOptions()}</select></label><label>Mode de connexion<select id="assign-mode"><option value="none">Sans proxy · URL d’origine</option><option value="direct">Proxy · IP du serveur</option><option value="warp">Proxy externe · WARP, SOCKS ou HTTP</option></select></label><p class="muted">L’adresse du proxy externe se configure dans Paramètres. Les URL publiques du dashboard doivent rester accessibles depuis vos appareils.</p></div><div class="dialog-actions"><button data-close>Annuler</button><button id="assign-preview" class="primary">Prévisualiser l’attribution</button></div>`,
+    `<h2>${esc(t("Attribuer l’addon"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="assign-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="assign-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="assign-mode"><option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · WARP, SOCKS ou HTTP"))}</option></select></label><p class="muted">${esc(t("L’adresse du proxy externe se configure dans Paramètres. Les URL publiques du dashboard doivent rester accessibles depuis vos appareils."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="assign-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
   );
   $("#assign-account").onchange = (e) =>
     run(async () => {
@@ -1151,20 +1250,20 @@ async function renderCopy() {
   if (!accountId) {
     $("#content").innerHTML =
       heading(
-        "Cloner un profil",
-        "Transférez tous les réglages synchronisés ou une sélection précise.",
+        t("nav.copy"),
+        t("Transférez tous les réglages synchronisés ou une sélection précise."),
       ) + emptyAccounts();
-    $("#connect").onclick = () => run(pair);
+    $("#connect").onclick = () => connectAccount();
     return;
   }
   await loadProfiles();
   selectedPaths = new Set();
   $("#content").innerHTML =
     heading(
-      "Cloner un profil",
-      "Choisissez une source, une destination, puis les éléments à transférer.",
+      t("nav.copy"),
+      t("Choisissez une source, une destination, puis les éléments à transférer."),
     ) +
-    `<div class="two-col"><section class="panel form"><h2>01 · Profil source</h2><label>Compte<select id="source-account">${accountOptions()}</select></label><label>Profil<select id="source-profile">${profileOptions()}</select></label></section><section class="panel form"><h2>02 · Profil destination</h2><label>Compte<select id="target-account">${accountOptions()}</select></label><label>Profil<select id="target-profile">${profileOptions(profiles, profiles.find((p) => p.profile_index !== profileId)?.profile_index)}</select></label></section></div><section class="panel"><h2>03 · Éléments à copier</h2><div class="form"><label class="check-label"><input type="checkbox" id="copy-tv" checked>Tous les paramètres ATV synchronisés</label><label class="check-label"><input type="checkbox" id="copy-mobile" checked>Tous les paramètres Mobile synchronisés</label><label class="check-label"><input type="checkbox" id="copy-addons" checked>Addons, activation et ordre</label><label class="check-label"><input type="checkbox" id="copy-plugins" checked>Plugins, activation et ordre</label><label class="check-label"><input type="checkbox" id="merge">Fusionner les listes d’addons et plugins avec la destination</label></div><hr>${btn("Choisir des paramètres précis", "select-paths")}<div id="path-selector"></div><p class="footer-note">Cette copie concerne les paramètres synchronisés, addons et plugins. Elle conserve l’identité, la bibliothèque et l’historique du profil cible. Les identifiants de fournisseurs stockés séparément ne sont pas copiés.</p></section><div class="actions">${btn("Prévisualiser la copie", "copy-preview", "primary")}</div>`;
+    `<div class="two-col"><section class="panel form"><h2>${esc(t("01 · Profil source"))}</h2><label>${esc(t("Compte"))}<select id="source-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="source-profile">${profileOptions()}</select></label></section><section class="panel form"><h2>${esc(t("02 · Profil destination"))}</h2><label>${esc(t("Compte"))}<select id="target-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="target-profile">${profileOptions(profiles, profiles.find((p) => p.profile_index !== profileId)?.profile_index)}</select></label></section></div><section class="panel"><h2>${esc(t("03 · Éléments à copier"))}</h2><div class="form"><label class="check-label"><input type="checkbox" id="copy-tv" checked>${esc(t("Tous les paramètres ATV synchronisés"))}</label><label class="check-label"><input type="checkbox" id="copy-mobile" checked>${esc(t("Tous les paramètres Mobile synchronisés"))}</label><label class="check-label"><input type="checkbox" id="copy-addons" checked>${esc(t("Addons, activation et ordre"))}</label><label class="check-label"><input type="checkbox" id="copy-plugins" checked>${esc(t("Plugins, activation et ordre"))}</label><label class="check-label"><input type="checkbox" id="merge">${esc(t("Fusionner les listes d’addons et plugins avec la destination"))}</label></div><hr>${btn(t("Choisir des paramètres précis"), "select-paths")}<div id="path-selector"></div><p class="footer-note">${esc(t("Cette copie concerne les paramètres synchronisés, addons et plugins. Elle conserve l’identité, la bibliothèque et l’historique du profil cible. Les identifiants de fournisseurs stockés séparément ne sont pas copiés."))}</p></section><div class="actions">${btn(t("Prévisualiser la copie"), "copy-preview", "primary")}</div>`;
   for (const side of ["source", "target"])
     $("#" + side + "-account").onchange = (e) =>
       run(async () => {
@@ -1189,7 +1288,7 @@ async function renderCopy() {
       $("#path-selector").innerHTML = ["tv", "mobile"]
         .map(
           (p) =>
-            `<details class="setting-group"><summary>${p === "tv" ? "ATV" : "Mobile"}</summary>${leaves(
+            `<details class="setting-group"><summary>${p === "tv" ? esc(t("ATV")) : esc(t("Mobile"))}</summary>${leaves(
               src[p].settings_json,
             )
               .filter((x) => x.path.length && !(x.path.length === 1 && x.path[0] === "version"))
@@ -1239,15 +1338,15 @@ async function renderCopy() {
 async function renderProxy() {
   $("#content").innerHTML =
     heading(
-      "Proxy",
-      "Le moteur stremio-addon-proxy est intégré au dashboard, avec une sortie choisie pour chaque addon.",
+      t("nav.proxy"),
+      t("Le moteur stremio-addon-proxy est intégré au dashboard, avec une sortie choisie pour chaque addon."),
     ) +
-    '<div id="proxy-status" class="status-grid"><p class="muted">Vérification des sorties réseau…</p></div><div class="hint">Sans proxy : le profil utilise l’URL originale. Proxy direct : les flux HTTP/HTTPS passent par l’IP du serveur. Proxy externe : ils passent par l’adresse HTTP(S) ou SOCKS définie dans Paramètres. Les flux torrent ne sont pas proxifiés.</div><p class="footer-note">Le proxy direct est toujours disponible. La sortie externe peut être un conteneur WARP ou tout autre proxy accessible depuis le serveur.</p>';
+    `<div id="proxy-status" class="status-grid"><p class="muted">${esc(t("Vérification des sorties réseau…"))}</p></div><div class="hint">${esc(t("Sans proxy : le profil utilise l’URL originale. Proxy direct : les flux HTTP/HTTPS passent par l’IP du serveur. Proxy externe : ils passent par l’adresse HTTP(S) ou SOCKS définie dans Paramètres. Les flux torrent ne sont pas proxifiés."))}</div><p class="footer-note">${esc(t("Le proxy direct est toujours disponible. La sortie externe peut être un conteneur WARP ou tout autre proxy accessible depuis le serveur."))}</p>`;
   const rows = await api("proxy/status");
   $("#proxy-status").innerHTML = rows
     .map(
       (r) =>
-        `<section class="panel"><h2>${r.mode === "direct" ? "Proxy direct" : "Proxy externe"}</h2><div class="status-value">${r.available ? "Sortie disponible" : r.configured ? "Proxy injoignable" : "Proxy non configuré"}</div><p class="muted">${r.available ? "Routage intégré : " + esc(r.upstream) : r.configured ? esc(r.error || "Vérifie l’adresse et la connexion du proxy.") : "Ajoute son URL dans Paramètres."}</p><button data-test="${r.mode}" ${r.available ? "" : "disabled"}>Tester l’IP de sortie</button><p id="ip-${r.mode}" class="muted"></p></section>`,
+        `<section class="panel"><h2>${r.mode === "direct" ? esc(t("Proxy direct")) : esc(t("Proxy externe"))}</h2><div class="status-value">${r.available ? esc(t("Sortie disponible")) : r.configured ? esc(t("Proxy injoignable")) : esc(t("Proxy non configuré"))}</div><p class="muted">${r.available ? esc(t("Routage intégré : {upstream}", { upstream: r.upstream })) : r.configured ? esc(r.error || t("Vérifie l’adresse et la connexion du proxy.")) : esc(t("Ajoute son URL dans Paramètres."))}</p><button data-test="${r.mode}" ${r.available ? "" : "disabled"}>${esc(t("Tester l’IP de sortie"))}</button><p id="ip-${r.mode}" class="muted"></p></section>`,
     )
     .join("");
   $$("[data-test]").forEach(
@@ -1256,29 +1355,29 @@ async function renderProxy() {
         run(async () => {
           const r = await api("proxy/test", { mode: b.dataset.test });
           $("#ip-" + b.dataset.test).textContent = r.ok
-            ? "IP de sortie : " + r.ip
-            : "Échec : " + r.error;
+            ? t("IP de sortie : {ip}", { ip: r.ip })
+            : t("Échec : {error}", { error: r.error });
         })),
   );
 }
 function renderBackups() {
   const activeAccount = state.accounts.find((item) => item.id === accountId);
   const backupActions = accountId
-    ? `<div class="actions">${btn("Charger depuis le PC", "backup-upload")}${btn("Sauvegarder le compte actif", "backup", "primary")}</div>`
+    ? `<div class="actions">${btn(t("Charger depuis le PC"), "backup-upload")}${btn(t("Sauvegarder le compte actif"), "backup", "primary")}</div>`
     : "";
   $("#content").innerHTML =
     heading(
-      "Sauvegardes",
-      "Jusqu’à trois points de retour chiffrés par compte Nuvio.",
+      t("nav.backups"),
+      t("Jusqu’à trois points de retour chiffrés par compte Nuvio."),
       backupActions,
     ) +
-    `<div class="hint">Chaque compte conserve ses trois sauvegardes les plus récentes. Une restauration remplace les données synchronisées du compte et crée d’abord une sauvegarde de sécurité.</div><div class="list">${state.backups.map((b) => `<article class="addon"><div class="addon-top"><div><strong>${esc(b.reason)}</strong><p class="muted">${esc(state.accounts.find((item) => item.id === b.accountId)?.name || b.email)} · ${esc(new Date(b.at).toLocaleString("fr-FR"))}</p></div><div class="actions"><a href="/api/backup/download?id=${encodeURIComponent(b.id)}" download>Télécharger</a>${state.accounts.some((item) => item.id === b.accountId) ? `<button data-backup-restore="${esc(b.id)}">Restaurer</button>` : ""}<button data-backup-delete="${esc(b.id)}" class="danger">Supprimer</button></div></div></article>`).join("") || '<div class="empty-inline">Les sauvegardes apparaîtront ici après votre premier enregistrement.</div>'}</div>`;
+    `<div class="hint">${esc(t("Chaque compte conserve ses trois sauvegardes les plus récentes. Une restauration remplace les données synchronisées du compte et crée d’abord une sauvegarde de sécurité."))}</div><div class="list">${state.backups.map((b) => `<article class="addon"><div class="addon-top"><div><strong>${esc(t(b.reason))}</strong><p class="muted">${esc(state.accounts.find((item) => item.id === b.accountId)?.name || b.email)} · ${esc(new Date(b.at).toLocaleString(getLang()))}</p></div><div class="actions"><a href="/api/backup/download?id=${encodeURIComponent(b.id)}" download>${esc(t("Télécharger"))}</a>${state.accounts.some((item) => item.id === b.accountId) ? `<button data-backup-restore="${esc(b.id)}">${esc(t("Restaurer"))}</button>` : ""}<button data-backup-delete="${esc(b.id)}" class="danger">${esc(t("Supprimer"))}</button></div></div></article>`).join("") || `<div class="empty-inline">${esc(t("Les sauvegardes apparaîtront ici après votre premier enregistrement."))}</div>`}</div>`;
   if ($("#backup"))
     $("#backup").onclick = () =>
       run(async () => {
         await api("backup/create", { accountId });
         await render();
-        toast("Sauvegarde créée");
+        toast(t("Sauvegarde créée"));
       });
   if ($("#backup-upload"))
     $("#backup-upload").onclick = () => {
@@ -1288,19 +1387,19 @@ function renderBackups() {
       input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
-        if (file.size > 20_000_000) return toast("Le fichier dépasse la limite de 20 Mo.");
+        if (file.size > 20_000_000) return toast(t("Le fichier dépasse la limite de 20 Mo."));
         let snapshot;
         try {
           snapshot = JSON.parse(await file.text());
         } catch {
-          return toast("Ce fichier ne contient pas un JSON valide.");
+          return toast(t("Ce fichier ne contient pas un JSON valide."));
         }
-        openDialog(`<h2>Restaurer cette sauvegarde ?</h2><p>Le fichier <strong>${esc(file.name)}</strong> remplacera les données synchronisées du compte <strong>${esc(activeAccount?.name || activeAccount?.email || "actif")}</strong>.</p><p class="hint warning">Une sauvegarde de sécurité sera créée automatiquement avant la restauration.</p><div class="dialog-actions"><button data-close>Annuler</button><button id="restore-uploaded-backup" class="danger">Restaurer le compte</button></div>`);
+        openDialog(`<h2>${esc(t("Restaurer cette sauvegarde ?"))}</h2><p>${t("Le fichier <strong>{name}</strong> remplacera les données synchronisées du compte <strong>{account}</strong>.", { name: esc(file.name), account: esc(activeAccount?.name || activeAccount?.email || t("actif")) })}</p><p class="hint warning">${esc(t("Une sauvegarde de sécurité sera créée automatiquement avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="restore-uploaded-backup" class="danger">${esc(t("Restaurer le compte"))}</button></div>`);
         $("#restore-uploaded-backup").onclick = () => run(async () => {
           await api("backup/restore-file", { accountId, backup: snapshot });
           $("#dialog").close();
           await render();
-          toast("Sauvegarde chargée et restaurée");
+          toast(t("Sauvegarde chargée et restaurée"));
         });
       };
       input.click();
@@ -1309,63 +1408,160 @@ function renderBackups() {
     button.onclick = () => {
       const item = state.backups.find((backup) => backup.id === button.dataset.backupRestore),
         target = state.accounts.find((account) => account.id === item?.accountId);
-      openDialog(`<h2>Restaurer cette sauvegarde ?</h2><p>Les données synchronisées du compte <strong>${esc(target?.name || target?.email || item?.email)}</strong> seront remplacées par la sauvegarde du ${esc(new Date(item.at).toLocaleString("fr-FR"))}.</p><p class="hint warning">Une sauvegarde de sécurité sera créée automatiquement avant la restauration.</p><div class="dialog-actions"><button data-close>Annuler</button><button id="restore-backup" class="danger">Restaurer le compte</button></div>`);
+      openDialog(`<h2>${esc(t("Restaurer cette sauvegarde ?"))}</h2><p>${t("Les données synchronisées du compte <strong>{account}</strong> seront remplacées par la sauvegarde du {date}.", { account: esc(target?.name || target?.email || item?.email), date: esc(new Date(item.at).toLocaleString(getLang())) })}</p><p class="hint warning">${esc(t("Une sauvegarde de sécurité sera créée automatiquement avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="restore-backup" class="danger">${esc(t("Restaurer le compte"))}</button></div>`);
       $("#restore-backup").onclick = () => run(async () => {
         await api("backup/restore", { accountId: item.accountId, id: item.id });
         $("#dialog").close();
         await render();
-        toast("Compte restauré");
+        toast(t("Compte restauré"));
       });
     };
   });
   $$('[data-backup-delete]').forEach((button) => {
     button.onclick = () => {
       const item = state.backups.find((backup) => backup.id === button.dataset.backupDelete);
-      openDialog(`<h2>Supprimer cette sauvegarde ?</h2><p>La sauvegarde du ${esc(new Date(item.at).toLocaleString("fr-FR"))} sera supprimée définitivement.</p><div class="dialog-actions"><button data-close>Annuler</button><button id="delete-backup" class="danger">Supprimer</button></div>`);
+      openDialog(`<h2>${esc(t("Supprimer cette sauvegarde ?"))}</h2><p>${t("La sauvegarde du {date} sera supprimée définitivement.", { date: esc(new Date(item.at).toLocaleString(getLang())) })}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="delete-backup" class="danger">${esc(t("Supprimer"))}</button></div>`);
       $("#delete-backup").onclick = () => run(async () => {
         await api("backup/delete", { id: item.id });
         $("#dialog").close();
         await render();
-        toast("Sauvegarde supprimée");
+        toast(t("Sauvegarde supprimée"));
       });
     };
   });
 }
-async function pair() {
+// Inline Tuvora brand logo (amber play square) — mirrors how Trakt/Simkl are
+// shipped as inline SVG so no external asset is needed.
+const TUVORA_LOGO = `<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="48" y="48" width="416" height="416" rx="52" fill="#f0b429"/><path fill="#141414" d="M204 164c-15 0-27 12-27 27v130c0 21 23 34 41 23l108-65c17-10 17-34 0-44l-108-65c-4-2-9-6-14-6z"/></svg>`;
+
+// Account providers sharing the Nuvio-fork TV-login pairing flow.
+const ACCOUNT_PROVIDERS = {
+  nuvio: {
+    name: "Nuvio",
+    tagline: "Films, séries et animés",
+    logoMark: `<img src="/assets/nuvio_logo.png" alt="" class="acct-choice-logo">`,
+    pairLogo: `<img class="nuvio-pair-logo" src="/assets/nuvio_login.webp" alt="Nuvio">`,
+    cls: "",
+  },
+  tuvora: {
+    name: "Tuvora",
+    tagline: "IPTV, sport et guide TV",
+    logoMark: `<span class="acct-choice-logo acct-choice-logo-svg">${TUVORA_LOGO}</span>`,
+    pairLogo: `<span class="nuvio-pair-logo nuvio-pair-logo-svg">${TUVORA_LOGO}</span>`,
+    cls: "provider-tuvora",
+    // Tuvora's device-login cannot be driven as anon, so accounts connect with
+    // email + password (exchanged for tokens; the password is never stored).
+    passwordConnect: true,
+  },
+};
+function connectAccount() {
   clearInterval(pairTimer);
+  const choice = (id) => {
+    const cfg = ACCOUNT_PROVIDERS[id];
+    return `<button type="button" class="acct-choice acct-choice-${id}" data-provider="${id}">
+      ${cfg.logoMark}
+      <span class="acct-choice-name">${esc(cfg.name)}</span>
+      <span class="acct-choice-desc">${esc(t(cfg.tagline))}</span>
+    </button>`;
+  };
   openDialog(
-    `<div class="nuvio-pair nuvio-pair-loading">
-      <button class="nuvio-pair-close" type="button" data-close aria-label="Fermer">×</button>
-      <img class="nuvio-pair-logo" src="/assets/nuvio_login.webp" alt="Nuvio">
-      <div class="nuvio-pair-spinner" aria-hidden="true"></div>
-      <h2>Préparation de la connexion…</h2>
-      <p>Nous créons votre lien sécurisé vers Nuvio.</p>
+    `<div class="acct-chooser">
+      <button class="nuvio-pair-close" type="button" data-close aria-label="${esc(t("Fermer"))}">×</button>
+      <h2>${esc(t("Connecter un compte"))}</h2>
+      <p class="acct-chooser-intro">${esc(t("Quel type de compte souhaitez-vous connecter ?"))}</p>
+      <div class="acct-chooser-options">${choice("nuvio")}${choice("tuvora")}</div>
     </div>`,
   );
-  const p = await api("pair/start");
+  $$(".acct-choice").forEach(
+    (button) =>
+      (button.onclick = () => {
+        const provider = button.dataset.provider;
+        if (ACCOUNT_PROVIDERS[provider]?.passwordConnect) connectWithPassword(provider);
+        else run(() => pair(provider));
+      }),
+  );
+}
+// Password-based connect window (Tuvora): same branded card, with an email +
+// password form instead of the code-pairing dance.
+function connectWithPassword(provider) {
+  clearInterval(pairTimer);
+  const cfg = ACCOUNT_PROVIDERS[provider] || ACCOUNT_PROVIDERS.nuvio;
+  openDialog(
+    `<div class="nuvio-pair ${cfg.cls}">
+      <button class="nuvio-pair-close" type="button" data-close aria-label="${esc(t("Fermer"))}">×</button>
+      ${cfg.pairLogo}
+      <h2>${esc(t("Connecter un compte {name}", { name: cfg.name }))}</h2>
+      <p class="nuvio-pair-intro">${esc(t("Saisissez les identifiants du compte {name} à connecter.", { name: cfg.name }))}</p>
+      <form id="pair-pass-form" class="nuvio-pair-form">
+        <label>${esc(t("Email {name}", { name: cfg.name }))}<input name="email" type="email" autocomplete="off" required></label>
+        <label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="off" required></label>
+        <button class="nuvio-pair-primary" type="submit">${esc(t("Connecter le compte"))}</button>
+        <p id="pair-pass-error" class="error" hidden></p>
+      </form>
+      <p class="nuvio-pair-note">${esc(t("Le mot de passe sert uniquement à la connexion et n’est jamais enregistré."))}</p>
+    </div>`,
+  );
+  $("#pair-pass-form").onsubmit = (event) => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.target));
+    run(async () => {
+      const err = $("#pair-pass-error");
+      if (err) err.hidden = true;
+      try {
+        const r = await api("accounts/connect", {
+          provider,
+          email: values.email,
+          password: values.password,
+        });
+        $("#dialog").close();
+        accountId = r.account.id;
+        toast(t("Compte connecté"));
+        await render();
+      } catch (e) {
+        if (err) {
+          err.hidden = false;
+          err.textContent = e.message;
+        }
+      }
+    });
+  };
+}
+async function pair(provider = "nuvio") {
+  clearInterval(pairTimer);
+  const cfg = ACCOUNT_PROVIDERS[provider] || ACCOUNT_PROVIDERS.nuvio;
+  openDialog(
+    `<div class="nuvio-pair nuvio-pair-loading ${cfg.cls}">
+      <button class="nuvio-pair-close" type="button" data-close aria-label="${esc(t("Fermer"))}">×</button>
+      ${cfg.pairLogo}
+      <div class="nuvio-pair-spinner" aria-hidden="true"></div>
+      <h2>${esc(t("Préparation de la connexion…"))}</h2>
+      <p>${esc(t("Nous créons votre lien sécurisé vers {name}.", { name: cfg.name }))}</p>
+    </div>`,
+  );
+  const p = await api("pair/start", { provider });
   const link = new URL(p.web_url);
   if (!["http:", "https:"].includes(link.protocol))
-    throw Error("Lien de connexion invalide");
+    throw Error(t("Lien de connexion invalide"));
   openDialog(
-    `<div class="nuvio-pair">
-      <button class="nuvio-pair-close" type="button" data-close aria-label="Fermer">×</button>
-      <img class="nuvio-pair-logo" src="/assets/nuvio_login.webp" alt="Nuvio">
-      <h2>Connecter un compte Nuvio</h2>
-      <p class="nuvio-pair-intro">Ouvrez Nuvio, connectez-vous à votre compte, puis validez l’association avec le dashboard.</p>
+    `<div class="nuvio-pair ${cfg.cls}">
+      <button class="nuvio-pair-close" type="button" data-close aria-label="${esc(t("Fermer"))}">×</button>
+      ${cfg.pairLogo}
+      <h2>${esc(t("Connecter un compte {name}", { name: cfg.name }))}</h2>
+      <p class="nuvio-pair-intro">${esc(t("Ouvrez {name}, connectez-vous à votre compte, puis validez l’association avec le dashboard.", { name: cfg.name }))}</p>
       <div class="nuvio-pair-code">
-        <span>Code de connexion</span>
+        <span>${esc(t("Code de connexion"))}</span>
         <strong>${esc(p.code)}</strong>
       </div>
       <a class="nuvio-pair-primary" href="${esc(link.href)}" target="_blank" rel="noreferrer">
-        <span aria-hidden="true">↗</span> Ouvrir le site Nuvio
+        <span aria-hidden="true">↗</span> ${esc(t("Ouvrir le site {name}", { name: cfg.name }))}
       </a>
-      <ol class="nuvio-pair-steps" aria-label="Étapes de connexion">
-        <li><span>1</span><strong>Ouvrir Nuvio</strong></li>
-        <li><span>2</span><strong>Se connecter</strong></li>
-        <li><span>3</span><strong>Valider le code</strong></li>
+      <ol class="nuvio-pair-steps" aria-label="${esc(t("Étapes de connexion"))}">
+        <li><span>1</span><strong>${esc(t("Ouvrir {name}", { name: cfg.name }))}</strong></li>
+        <li><span>2</span><strong>${esc(t("Se connecter"))}</strong></li>
+        <li><span>3</span><strong>${esc(t("Valider le code"))}</strong></li>
       </ol>
-      <button id="pair-check" class="nuvio-pair-secondary" type="button">J’ai terminé la connexion</button>
-      <p id="pair-status" class="nuvio-pair-status" aria-live="polite"><span class="nuvio-pair-status-dot" aria-hidden="true"></span><span>En attente de votre validation…</span></p>
+      <button id="pair-check" class="nuvio-pair-secondary" type="button">${esc(t("J’ai terminé la connexion"))}</button>
+      <p id="pair-status" class="nuvio-pair-status" aria-live="polite"><span class="nuvio-pair-status-dot" aria-hidden="true"></span><span>${esc(t("En attente de votre validation…"))}</span></p>
     </div>`,
   );
   let busy = false;
@@ -1386,16 +1582,16 @@ async function pair() {
       const r = await api("pair/poll", { id: p.id });
       if (r.status === "connected") {
         clearInterval(pairTimer);
-        setStatus("Connexion confirmée.", "connected");
+        setStatus(t("Connexion confirmée."), "connected");
         $("#dialog").close();
         accountId = r.account.id;
-        toast("Compte connecté");
+        toast(t("Compte connecté"));
         await render();
       } else if (r.status === "expired") {
         clearInterval(pairTimer);
-        setStatus("Code expiré. Fermez puis recommencez.", "error");
+        setStatus(t("Code expiré. Fermez puis recommencez."), "error");
       } else {
-        setStatus("En attente de votre validation…");
+        setStatus(t("En attente de votre validation…"));
       }
     } catch (e) {
       clearInterval(pairTimer);
@@ -1416,10 +1612,10 @@ function login() {
   const host = document.createElement("div");
   host.className = "auth-screen";
   host.innerHTML =
-    `<div class="auth-card"><div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="64" height="64"><div><h2>Nuvio Manager</h2><p class="muted">Connectez-vous à votre dashboard.</p></div></div>` +
-    `<form id="nuvio-login" class="form"><label>Email Nuvio<input name="email" type="email" autocomplete="username" placeholder="vous@exemple.com" required></label><label>Mot de passe Nuvio<input name="password" type="password" autocomplete="current-password" required></label><button class="primary"><img class="btn-logo" src="/assets/nuvio_logo.png" alt="">Se connecter avec Nuvio</button><p id="nuvio-error" class="error" hidden></p></form>` +
-    `<div class="auth-sep"><span>ou</span></div>` +
-    `<details class="auth-admin"><summary>Connexion local</summary><form id="admin-login" class="form"><label>Utilisateur<input name="user" autocomplete="username" required></label><label>Mot de passe<input name="password" type="password" autocomplete="current-password" required></label><button>Se connecter</button><p id="admin-error" class="error" hidden></p></form></details></div>`;
+    `<div class="auth-card"><div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="64" height="64"><div><h2>Nuvio Manager</h2><p class="muted">${esc(t("Connectez-vous à votre dashboard."))}</p></div></div>` +
+    `<form id="nuvio-login" class="form"><label>${esc(t("Email"))}<input name="email" type="email" autocomplete="username" placeholder="${esc(t("vous@exemple.com"))}" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="current-password" required></label><button class="primary">${esc(t("Se connecter"))}</button><p id="nuvio-error" class="error" hidden></p></form>` +
+    `<div class="auth-sep"><span>${esc(t("ou"))}</span></div>` +
+    `<details class="auth-admin"><summary>${esc(t("Connexion local"))}</summary><form id="admin-login" class="form"><label>${esc(t("Utilisateur"))}<input name="user" autocomplete="username" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="current-password" required></label><button>${esc(t("Se connecter"))}</button><p id="admin-error" class="error" hidden></p></form></details></div>`;
   document.body.appendChild(host);
   const done = async () => { host.remove(); await render(); };
   const bind = (formId, route, errId) => {
@@ -1441,14 +1637,14 @@ function login() {
 }
 function setup(publicUrlOnly = false) {
   openDialog(
-    `<div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="76" height="76"><div><h2>${publicUrlOnly ? "Configurer l’adresse publique" : "Créer l’administrateur"}</h2><p class="muted">${publicUrlOnly ? "Finalisez la migration de votre dashboard." : "Première configuration de votre dashboard privé."}</p></div></div><form id="setup-form" class="form"><label>Code de configuration<input name="code" autocomplete="one-time-code" maxlength="32" placeholder="Code affiché dans les journaux Docker" required></label>${publicUrlOnly ? "" : '<label>Nom d’utilisateur<input name="username" autocomplete="username" maxlength="80" required></label><label>Mot de passe<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label><label>Confirmer le mot de passe<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label>'}<label>Adresse publique du dashboard<input name="publicUrl" type="url" value="${esc(location.origin)}" autocomplete="off" required></label><p class="muted">Récupérez le code avec <code>docker logs nuvio-manager</code>. L’adresse publique servira à générer les URL des addons proxifiés.</p><button class="primary">${publicUrlOnly ? "Enregistrer l’adresse" : "Créer l’administrateur"}</button><p id="setup-error" class="error" hidden></p></form>`,
+    `<div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="76" height="76"><div><h2>${publicUrlOnly ? esc(t("Configurer l’adresse publique")) : esc(t("Créer l’administrateur"))}</h2><p class="muted">${publicUrlOnly ? esc(t("Finalisez la migration de votre dashboard.")) : esc(t("Première configuration de votre dashboard privé."))}</p></div></div><form id="setup-form" class="form"><label>${esc(t("Code de configuration"))}<input name="code" autocomplete="one-time-code" maxlength="32" placeholder="${esc(t("Code affiché dans les journaux Docker"))}" required></label>${publicUrlOnly ? "" : `<label>${esc(t("Nom d’utilisateur"))}<input name="username" autocomplete="username" maxlength="80" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label><label>${esc(t("Confirmer le mot de passe"))}<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label>`}<label>${esc(t("Adresse publique du dashboard"))}<input name="publicUrl" type="url" value="${esc(location.origin)}" autocomplete="off" required></label><p class="muted">${t("Récupérez le code avec {code}. L’adresse publique servira à générer les URL des addons proxifiés.", { code: "<code>docker logs nuvio-manager</code>" })}</p><button class="primary">${publicUrlOnly ? esc(t("Enregistrer l’adresse")) : esc(t("Créer l’administrateur"))}</button><p id="setup-error" class="error" hidden></p></form>`,
   );
   $("#setup-form").onsubmit = async (event) => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.target));
     if (!publicUrlOnly && values.password !== values.confirmation) {
       $("#setup-error").hidden = false;
-      $("#setup-error").textContent = "Les deux mots de passe ne correspondent pas.";
+      $("#setup-error").textContent = t("Les deux mots de passe ne correspondent pas.");
       return;
     }
     try {
@@ -1481,6 +1677,10 @@ $("#logout").onclick = () =>
     login();
   });
 run(async () => {
+  await initI18n();
+  setupLangSelect();
+  const loading = $("#content");
+  if (loading) loading.innerHTML = `<p>${esc(t("app.loading"))}</p>`;
   const initial = await api("setup");
   if (initial.required) setup();
   else if (initial.publicUrlRequired) setup(true);

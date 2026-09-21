@@ -7,10 +7,12 @@
     const button = document.getElementById('theme-toggle');
     function update() {
       const light = document.documentElement.dataset.theme === 'light';
-      button.textContent = light ? '☾ Mode sombre' : '☀ Mode clair';
-      button.setAttribute('aria-label', light ? 'Passer en mode sombre' : 'Passer en mode clair');
+      const labels = window.i18nTheme && window.i18nTheme(light);
+      button.textContent = labels ? labels.text : (light ? '☾ Mode sombre' : '☀ Mode clair');
+      button.setAttribute('aria-label', labels ? labels.aria : (light ? 'Passer en mode sombre' : 'Passer en mode clair'));
       button.setAttribute('aria-pressed', String(light));
     }
+    window.__themeUpdate = update;
     button.addEventListener('click', () => {
       const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
       document.documentElement.dataset.theme = next;
