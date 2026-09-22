@@ -946,7 +946,7 @@ const server = http.createServer(async (req, res) => {
             .filter(Boolean),
         )].sort();
         const statsAccounts = isAdmin ? state.accounts : state.accounts.filter((a) => a.id === viewer.account);
-        const cacheKey = `stats-v5:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
+        const cacheKey = `stats-v8:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
         const cached = statisticsCache.get(cacheKey);
         if (!url.searchParams.has("refresh") && cached?.expiresAt > Date.now())
           return json(res, cached.value);
@@ -977,10 +977,18 @@ const server = http.createServer(async (req, res) => {
         const result = summarizeStatistics(selected, days);
         result.availableProfiles = availableProfiles;
         const rankedItems = Object.values(result.rankings || {}).flat();
-        const metadataItems = [...result.top, ...rankedItems, ...result.recent].map((item) => ({
-          content_id: item.contentId,
-          content_type: item.kind === "movie" ? "movie" : "series",
-        }));
+        const timelineItems = (result.timeline || []).flatMap((day) => day.items || []);
+        const metadataItems = [
+          ...new Map(
+            [...result.top, ...rankedItems, ...result.recent, ...timelineItems].map((item) => {
+              const contentType = item.kind === "movie" ? "movie" : "series";
+              return [
+                `${contentType}:${item.contentId}`,
+                { content_id: item.contentId, content_type: contentType },
+              ];
+            }),
+          ).values(),
+        ];
         const enriched = await enrichActivity(
           {
             items: metadataItems,
@@ -1015,7 +1023,28 @@ const server = http.createServer(async (req, res) => {
             })),
           ]),
         );
+        // Attach the TMDB title (localized) + slim poster/backdrop to each day's
+        // items so the day view matches the rest of the UI's language instead of
+        // showing each source's raw title (Nuvio in FR, Simkl in EN, …).
+        result.timeline = (result.timeline || []).map((day) => ({
+          ...day,
+          items: (day.items || []).map((item) => {
+            const meta = metadata.get(`${item.kind === "movie" ? "movie" : "series"}:${item.contentId}`);
+            return {
+              ...item,
+              title: meta?.title || item.title,
+              poster: meta?.poster || null,
+              backdrop: meta?.backdrop || null,
+            };
+          }),
+        }));
         result.tmdb = enriched.tmdb;
+        // Full metadata keyed by "type:contentId" (deduped, one entry per title)
+        // so the day view can open a complete media sheet for any title, not just
+        // the ranked ones, without bloating each timeline event.
+        result.mediaMetadata = Object.fromEntries(
+          [...metadata.entries()].filter(([, value]) => value),
+        );
         statisticsCache.set(cacheKey, {
           expiresAt: Date.now() + 5 * 60 * 1000,
           value: result,

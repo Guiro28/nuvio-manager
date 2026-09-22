@@ -33,7 +33,7 @@ let state,
   profileId = 1,
   profiles = [],
   current,
-  tab = "tv",
+  tab = "identity",
   draft,
   selectedPaths = new Set(),
   settingsSection = { tv: "appearance", mobile: "layout" },
@@ -604,17 +604,17 @@ function renderEditor() {
   const e = $("#editor");
   const isTuvora = accountProvider() === "tuvora";
   const tabs = [
-    ["tv", "Paramètres ATV"],
+    ["identity", "Profil"],
+    ["tv", "Paramètres TV"],
     ["mobile", "Paramètres Mobile"],
     ["addons", "Addons"],
     ["plugins", "Plugins"],
     ...(isTuvora ? [["iptv", "IPTV"], ["sports", "Guide des sports"]] : []),
-    ["identity", "Profil"],
     ["connections", "Sources de suivi"],
     ["history", t("Historique {name}", { name: isTuvora ? "Tuvora" : "Nuvio" })],
   ];
   // A previously-selected Tuvora-only tab must not stick on a Nuvio profile.
-  if (!isTuvora && (tab === "iptv" || tab === "sports")) tab = "tv";
+  if (!isTuvora && (tab === "iptv" || tab === "sports")) tab = "identity";
   e.innerHTML = `<div class="tabs">${tabs
     .map(
       ([k, v]) =>
@@ -1263,7 +1263,7 @@ async function renderCopy() {
       t("nav.copy"),
       t("Choisissez une source, une destination, puis les éléments à transférer."),
     ) +
-    `<div class="two-col"><section class="panel form"><h2>${esc(t("01 · Profil source"))}</h2><label>${esc(t("Compte"))}<select id="source-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="source-profile">${profileOptions()}</select></label></section><section class="panel form"><h2>${esc(t("02 · Profil destination"))}</h2><label>${esc(t("Compte"))}<select id="target-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="target-profile">${profileOptions(profiles, profiles.find((p) => p.profile_index !== profileId)?.profile_index)}</select></label></section></div><section class="panel"><h2>${esc(t("03 · Éléments à copier"))}</h2><div class="form"><label class="check-label"><input type="checkbox" id="copy-tv" checked>${esc(t("Tous les paramètres ATV synchronisés"))}</label><label class="check-label"><input type="checkbox" id="copy-mobile" checked>${esc(t("Tous les paramètres Mobile synchronisés"))}</label><label class="check-label"><input type="checkbox" id="copy-addons" checked>${esc(t("Addons, activation et ordre"))}</label><label class="check-label"><input type="checkbox" id="copy-plugins" checked>${esc(t("Plugins, activation et ordre"))}</label><label class="check-label"><input type="checkbox" id="merge">${esc(t("Fusionner les listes d’addons et plugins avec la destination"))}</label></div><hr>${btn(t("Choisir des paramètres précis"), "select-paths")}<div id="path-selector"></div><p class="footer-note">${esc(t("Cette copie concerne les paramètres synchronisés, addons et plugins. Elle conserve l’identité, la bibliothèque et l’historique du profil cible. Les identifiants de fournisseurs stockés séparément ne sont pas copiés."))}</p></section><div class="actions">${btn(t("Prévisualiser la copie"), "copy-preview", "primary")}</div>`;
+    `<div class="two-col"><section class="panel form"><h2>${esc(t("01 · Profil source"))}</h2><label>${esc(t("Compte"))}<select id="source-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="source-profile">${profileOptions()}</select></label></section><section class="panel form"><h2>${esc(t("02 · Profil destination"))}</h2><label>${esc(t("Compte"))}<select id="target-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="target-profile">${profileOptions(profiles, profiles.find((p) => p.profile_index !== profileId)?.profile_index)}</select></label></section></div><section class="panel"><h2>${esc(t("03 · Éléments à copier"))}</h2><div class="form"><label class="check-label"><input type="checkbox" id="copy-tv" checked>${esc(t("Tous les paramètres TV synchronisés"))}</label><label class="check-label"><input type="checkbox" id="copy-mobile" checked>${esc(t("Tous les paramètres Mobile synchronisés"))}</label><label class="check-label"><input type="checkbox" id="copy-addons" checked>${esc(t("Addons, activation et ordre"))}</label><label class="check-label"><input type="checkbox" id="copy-plugins" checked>${esc(t("Plugins, activation et ordre"))}</label><label class="check-label"><input type="checkbox" id="merge">${esc(t("Fusionner les listes d’addons et plugins avec la destination"))}</label></div><hr>${btn(t("Choisir des paramètres précis"), "select-paths")}<div id="path-selector"></div><p class="footer-note">${esc(t("Cette copie concerne les paramètres synchronisés, addons et plugins. Elle conserve l’identité, la bibliothèque et l’historique du profil cible. Les identifiants de fournisseurs stockés séparément ne sont pas copiés."))}</p></section><div class="actions">${btn(t("Prévisualiser la copie"), "copy-preview", "primary")}</div>`;
   for (const side of ["source", "target"])
     $("#" + side + "-account").onchange = (e) =>
       run(async () => {
@@ -1288,7 +1288,7 @@ async function renderCopy() {
       $("#path-selector").innerHTML = ["tv", "mobile"]
         .map(
           (p) =>
-            `<details class="setting-group"><summary>${p === "tv" ? esc(t("ATV")) : esc(t("Mobile"))}</summary>${leaves(
+            `<details class="setting-group"><summary>${p === "tv" ? esc(t("TV")) : esc(t("Mobile"))}</summary>${leaves(
               src[p].settings_json,
             )
               .filter((x) => x.path.length && !(x.path.length === 1 && x.path[0] === "version"))

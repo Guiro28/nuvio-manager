@@ -80,6 +80,21 @@ export function summarizeStatistics(profiles, days = 30, now = Date.now()) {
       profiles: [...perProfile.entries()]
         .map(([ref, count]) => ({ ref, count }))
         .sort((a, b) => b.count - a.count),
+      // Per-day watch list, so the UI can open a day and show which profile
+      // watched what (split into films/series). Newest first.
+      items: [...dayEvents]
+        .sort((a, b) => b.at - a.at)
+        .map((event) => ({
+          contentId: event.contentId,
+          title: event.title || event.contentId,
+          kind: event.kind,
+          season: event.season ?? null,
+          episode: event.episode ?? null,
+          source: event.source,
+          at: event.at,
+          ref: event.ref,
+          profileName: event.profileName,
+        })),
     });
   }
   const popularity = new Map();

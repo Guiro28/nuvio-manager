@@ -102,6 +102,180 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       .join("");
     return `<div class="stats-daytip-head"><span>${esc(dateLabel)}</span><span>${day.count} ${esc(t(day.count > 1 ? "lectures" : "lecture"))}</span></div><ul>${rows || `<li class="muted">${esc(t("Aucune lecture"))}</li>`}</ul>`;
   };
+  const dayItemCard = (item, index) => {
+    const poster = safeImageUrl(item.poster);
+    const title = mediaTitle(item);
+    const episode = item.kind === "episode" && (item.season != null || item.episode != null)
+      ? `S${String(item.season ?? 0).padStart(2, "0")} E${String(item.episode ?? 0).padStart(2, "0")}`
+      : "";
+    const at = item.at ? new Date(item.at).toLocaleTimeString(getLang(), { hour: "2-digit", minute: "2-digit" }) : "";
+    const meta = [item.profileName || t("Profil inconnu"), at].filter(Boolean).join(" · ");
+    const logo = sourceLogo(item.source), label = sourceLabel(item.source);
+    const source = logo
+      ? `<span class="stats-day-source" title="${esc(label)}"><img src="${esc(logo)}" alt="${esc(label)}" loading="lazy"></span>`
+      : `<span class="stats-day-source stats-day-source-text" title="${esc(label)}">${esc(label)}</span>`;
+    return `<article class="stats-day-item" tabindex="0" role="button" data-day-media="${index}" aria-label="${esc(t("Afficher les détails de {title}", { title }))}">
+      <div class="stats-day-poster">${poster ? `<img src="${esc(poster)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<span aria-hidden="true">▶</span>'}</div>
+      <div class="stats-day-item-main">
+        <strong title="${esc(title)}">${esc(title)}</strong>
+        ${episode ? `<span class="stats-day-sub">${esc(episode)}</span>` : ""}
+        <span class="stats-day-meta">${esc(meta)}</span>
+      </div>
+      ${source}
+    </article>`;
+  };
+  const dayTabPanel = (items, emptyLabel) =>
+    items.length
+      ? `<div class="stats-day-list">${items.map((item, index) => dayItemCard(item, index)).join("")}</div>`
+      : `<p class="stats-card-empty">${esc(emptyLabel)}</p>`;
+  const allProfilesIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
+  const dayAvatar = (info) => {
+    const url = safeImageUrl(info?.avatarUrl);
+    const initial = esc((info?.profileName || "").trim().slice(0, 1).toUpperCase() || "•");
+    return url ? `<img src="${esc(url)}" alt="" referrerpolicy="no-referrer">` : `<span>${initial}</span>`;
+  };
+  const showDayDetail = (day) => {
+    const items = day.items || [];
+    const dateLabel = new Date(`${day.date}T00:00:00`).toLocaleDateString(getLang(), {
+      weekday: "long", day: "numeric", month: "long", year: "numeric",
+    });
+    // Profiles active that day, ordered by their play count (day.profiles is
+    // already sorted); "all" is prepended as an aggregate view.
+    const order = (day.profiles || []).map((entry) => entry.ref);
+    const refs = [...new Set(items.map((item) => item.ref))]
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    const state = { ref: "all", kind: null };
+    let currentList = [];
+    const itemsFor = (ref) => (ref === "all" ? items : items.filter((item) => item.ref === ref));
+    openDialog?.(`<article class="stats-detail-modal stats-day-modal">
+      <header class="stats-day-header">
+        <p class="stats-detail-kicker">${esc(t("Activité du jour"))}</p>
+        <h2>${esc(dateLabel)}</h2>
+        <p class="muted">${day.count} ${esc(t(day.count > 1 ? "lectures" : "lecture"))}</p>
+      </header>
+      <div class="stats-day-profiles" role="tablist" aria-label="${esc(t("Profils"))}"></div>
+      <div class="stats-day-tabs" role="tablist"></div>
+      <div class="stats-day-body"></div>
+      <div class="dialog-actions"><button type="button" data-close>${esc(t("Fermer"))}</button></div>
+    </article>`);
+    const dialog = document.getElementById("dialog");
+    if (!dialog) return;
+    const profilesRow = dialog.querySelector(".stats-day-profiles");
+    const tabsRow = dialog.querySelector(".stats-day-tabs");
+    const body = dialog.querySelector(".stats-day-body");
+    const chip = (ref) => {
+      const info = ref === "all" ? null : profileDetails.get(ref);
+      const name = ref === "all" ? t("Tous") : info?.profileName || t("Profil");
+      const active = ref === state.ref;
+      const avatar = ref === "all"
+        ? `<span class="stats-day-profile-icon">${allProfilesIcon}</span>`
+        : dayAvatar(info);
+      return `<button type="button" role="tab" class="stats-day-profile${active ? " active" : ""}" data-day-profile="${esc(ref)}" aria-selected="${active}" title="${esc(name)}"><span class="stats-day-profile-av">${avatar}<span class="stats-day-profile-count">${itemsFor(ref).length}</span></span><span class="stats-day-profile-name">${esc(name)}</span></button>`;
+    };
+    const renderChips = () => {
+      profilesRow.innerHTML = ["all", ...refs].map(chip).join("");
+    };
+    const tab = (kind, count, active) =>
+      `<button type="button" role="tab" class="${active ? "active" : ""}" data-day-tab="${kind}" aria-selected="${active}">${esc(kind === "movie" ? t("Films") : t("Séries"))} <span>${count}</span></button>`;
+    const renderTabsAndBody = () => {
+      const scoped = itemsFor(state.ref);
+      const movies = scoped.filter((item) => item.kind === "movie");
+      const series = scoped.filter((item) => item.kind !== "movie");
+      if (!state.kind) state.kind = movies.length || !series.length ? "movie" : "episode";
+      if (state.kind === "movie" && !movies.length && series.length) state.kind = "episode";
+      if (state.kind === "episode" && !series.length && movies.length) state.kind = "movie";
+      tabsRow.innerHTML = tab("movie", movies.length, state.kind === "movie") + tab("episode", series.length, state.kind === "episode");
+      currentList = state.kind === "movie" ? movies : series;
+      body.innerHTML = dayTabPanel(currentList, state.kind === "movie" ? t("Aucun film ce jour-là.") : t("Aucun épisode ce jour-là."));
+    };
+    const openMedia = (item) => {
+      // Aggregate every play of this title across all days, profiles and sources
+      // (the timeline is the fullest client-side dataset), so the sheet shows the
+      // combined count instead of only the clicked event's single source.
+      const events = (currentData?.timeline || [])
+        .flatMap((entry) => entry.items || [])
+        .filter((it) => it.contentId === item.contentId && it.kind === item.kind);
+      const byRef = new Map();
+      const sources = new Set(), seasons = new Set(), episodes = new Set();
+      let lastActivity = 0, poster = item.poster, backdrop = item.backdrop, title = item.title;
+      for (const ev of events) {
+        sources.add(ev.source);
+        const detail = byRef.get(ev.ref) || {
+          ref: ev.ref,
+          profileName: profileDetails.get(ev.ref)?.profileName || ev.profileName,
+          plays: 0,
+        };
+        detail.plays++;
+        byRef.set(ev.ref, detail);
+        if (ev.kind === "episode") {
+          episodes.add(`${ev.season ?? ""}:${ev.episode ?? ""}`);
+          if (ev.season != null) seasons.add(ev.season);
+        }
+        lastActivity = Math.max(lastActivity, ev.at || 0);
+        poster = poster || ev.poster;
+        backdrop = backdrop || ev.backdrop;
+        title = title || ev.title;
+      }
+      // Full TMDB metadata (synopsis, year, rating, genres…) for any title, from
+      // the deduped map; fall back to the ranked aggregate, then a slim poster.
+      const metaKey = `${item.kind === "movie" ? "movie" : "series"}:${item.contentId}`;
+      const fullMeta = currentData?.mediaMetadata?.[metaKey] || matchingAggregate(item)?.metadata || null;
+      showMediaDetail({
+        contentId: item.contentId,
+        title,
+        kind: item.kind,
+        season: item.season,
+        episode: item.episode,
+        plays: events.length || 1,
+        profiles: byRef.size,
+        profileDetails: [...byRef.values()].sort((a, b) => b.plays - a.plays),
+        sources: [...sources],
+        seasonCount: seasons.size,
+        episodeCount: episodes.size,
+        lastActivity,
+        metadata: fullMeta || (poster || backdrop ? { poster, backdrop, title } : null),
+      });
+      // Opened from the day listing: offer a "back" action that reopens it
+      // instead of only the "Fermer" that closes everything.
+      const actions = document.getElementById("dialog")?.querySelector(".dialog-actions");
+      if (actions) {
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "stats-day-back";
+        back.textContent = `← ${t("Retour")}`;
+        back.addEventListener("click", () => showDayDetail(day));
+        actions.prepend(back);
+      }
+    };
+    profilesRow.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-day-profile]");
+      if (!button) return;
+      state.ref = button.dataset.dayProfile;
+      renderChips();
+      renderTabsAndBody();
+    });
+    tabsRow.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-day-tab]");
+      if (!button) return;
+      state.kind = button.dataset.dayTab;
+      renderTabsAndBody();
+    });
+    const activateMedia = (target) => {
+      const card = target.closest("[data-day-media]");
+      if (!card) return;
+      const item = currentList[Number(card.dataset.dayMedia)];
+      if (item) openMedia(item);
+    };
+    body.addEventListener("click", (event) => activateMedia(event.target));
+    body.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      if (!event.target.closest("[data-day-media]")) return;
+      event.preventDefault();
+      activateMedia(event.target);
+    });
+    renderChips();
+    renderTabsAndBody();
+  };
   function bindTimelineTooltip(host) {
     // A single viewport-fixed tooltip, reused across renders, so it can always
     // sit just above the cursor without being clipped by the chart.
@@ -135,6 +309,15 @@ export async function renderStatistics(container, { api, run, openDialog }) {
         place(day, r.left + r.width / 2, r.top);
       });
       bar.addEventListener("blur", () => { tip.hidden = true; });
+      // Clicking a day opens the full watch list for that date.
+      bar.classList.add("timeline-day-clickable");
+      const open = () => { tip.hidden = true; showDayDetail(day); };
+      bar.addEventListener("click", open);
+      bar.addEventListener("keydown", (event) => {
+        if (!["Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        open();
+      });
     });
   }
   function render(data) {
