@@ -229,3 +229,122 @@ export async function radarSearch(token, kind, query, providerId) {
     : data?.results || data?.leagues || data?.teams || data?.data || [];
   return Array.isArray(rows) ? rows : [];
 }
+
+// ── Catalogues d'accueil & collections (Nuvio + Tuvora share the API) ──────────
+// Both are per-profile. Home catalogs govern the order/enable of the home rows;
+// collections are custom rows (folders → sources). See the collections-catalogs
+// data model note. The home-catalog RPC is overloaded, so p_platform is required.
+const HOME_CATALOG_PLATFORM = "home_catalog_shared";
+
+export async function collections(token, id, providerId = "nuvio") {
+  const rows = await rpc("sync_pull_collections", { p_profile_id: id }, token, providerId);
+  const blob = Array.isArray(rows) ? rows[0] : rows;
+  const raw = blob?.collections_json ?? blob?.collectionsJson ?? [];
+  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.collections) ? raw.collections : [];
+  return Array.isArray(list) ? list : [];
+}
+
+export async function pushCollections(token, id, collectionsJson, providerId = "nuvio", extra = {}) {
+  return rpc(
+    "sync_push_collections",
+    { p_profile_id: id, p_collections_json: collectionsJson, ...extra },
+    token,
+    providerId,
+  );
+}
+
+export async function homeCatalogSettings(token, id, providerId = "nuvio") {
+  const rows = await rpc(
+    "sync_pull_home_catalog_settings",
+    { p_profile_id: id, p_platform: HOME_CATALOG_PLATFORM },
+    token,
+    providerId,
+  );
+  const blob = Array.isArray(rows) ? rows[0] : rows;
+  const settings = blob?.settings_json ?? blob?.settingsJson ?? {};
+  return {
+    hideUnreleasedContent: Boolean(settings.hide_unreleased_content),
+    items: Array.isArray(settings.items) ? settings.items : [],
+    updatedAt: blob?.updated_at ?? null,
+  };
+}
+
+export async function pushHomeCatalogSettings(token, id, settingsJson, providerId = "nuvio", extra = {}) {
+  return rpc(
+    "sync_push_home_catalog_settings",
+    { p_profile_id: id, p_platform: HOME_CATALOG_PLATFORM, p_settings_json: settingsJson, ...extra },
+    token,
+    providerId,
+  );
+}
+
+// Reference of catalogs available to add as sources / to order on the home:
+// the profile's installed addons plus each manifest's declared catalogs.
+async function fetchManifest(baseUrl) {
+  const url = baseUrl.replace(/\/?$/, "/") + "manifest.json";
+  const response = await fetch(url, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`Manifest ${response.status}`);
+  return response.json();
+}
+
+const catalogIsSearchOnly = (catalog) =>
+  Array.isArray(catalog?.extra) &&
+  catalog.extra.some(
+    (entry) => String(entry?.name || entry || "").trim().toLowerCase() === "search" && Boolean(entry?.isRequired),
+  );
+
+export async function catalogSources(token, id, providerId = "nuvio") {
+  const profiles = await rpc("sync_pull_profiles", {}, token, providerId);
+  const identity = profiles.find((p) => p.profile_index === id);
+  assert(identity, "Profil introuvable", 404);
+  const addonsPid = identity.uses_primary_addons ? 1 : id;
+  const rows = await call(
+    `/rest/v1/addons?user_id=eq.${encodeURIComponent(identity.user_id)}&profile_id=eq.${addonsPid}&order=sort_order.asc`,
+    null,
+    token,
+    "GET",
+    providerId,
+  );
+  return Promise.all(
+    (Array.isArray(rows) ? rows : []).map(async (row) => {
+      const addonBaseUrl = String(row.url || "").replace(/\/?$/, "/");
+      const base = {
+        addonId: String(row.url || ""),
+        addonName: String(row.name || ""),
+        addonBaseUrl,
+        enabled: row.enabled !== false,
+        catalogs: [],
+        ok: false,
+      };
+      try {
+        const manifest = await fetchManifest(addonBaseUrl);
+        const catalogs = (Array.isArray(manifest.catalogs) ? manifest.catalogs : [])
+          .filter((catalog) => catalog?.type && catalog?.id && !catalogIsSearchOnly(catalog))
+          .map((catalog) => {
+            const genreExtra = Array.isArray(catalog.extra)
+              ? catalog.extra.find((entry) => String(entry?.name || "").toLowerCase() === "genre")
+              : null;
+            return {
+              type: String(catalog.type),
+              id: String(catalog.id),
+              name: String(catalog.name || catalog.id),
+              genreOptions: genreExtra?.options || catalog.genres || [],
+              genreRequired: Boolean(genreExtra?.isRequired),
+              // Whether the catalog shows on the home screen by default: manifests
+              // that don't declare showInHome default to true (like the app).
+              home: !Object.hasOwn(catalog, "showInHome") || catalog.showInHome === true,
+            };
+          });
+        return {
+          ...base,
+          addonId: String(manifest.id || row.url || ""),
+          addonName: String(manifest.name || row.name || ""),
+          catalogs,
+          ok: true,
+        };
+      } catch {
+        return base;
+      }
+    }),
+  );
+}

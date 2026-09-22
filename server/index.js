@@ -28,7 +28,7 @@ import {
   copyPaths,
   vault,
 } from "./core.js";
-import { call, rpc, profile, profileList, backend, providerOf, PROVIDERS, iptvPlaylists, pushIptvPlaylists, radarFollows, pushRadar, radarSearch } from "./nuvio.js";
+import { call, rpc, profile, profileList, backend, providerOf, PROVIDERS, iptvPlaylists, pushIptvPlaylists, radarFollows, pushRadar, radarSearch, collections, pushCollections, homeCatalogSettings, pushHomeCatalogSettings, catalogSources } from "./nuvio.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const host = process.env.HOST || "127.0.0.1",
@@ -935,6 +935,51 @@ const server = http.createServer(async (req, res) => {
         const results = await radarSearch(await token(a), kind, query, a.provider);
         return json(res, { results });
       }
+      if (route === "/api/collections") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        const a = account(url.searchParams.get("accountId"));
+        const profileId = Number(url.searchParams.get("profileId"));
+        await assertProfile(a.id, profileId);
+        const access = await token(a);
+        const [home, cols, catalogs] = await Promise.all([
+          homeCatalogSettings(access, profileId, a.provider),
+          collections(access, profileId, a.provider),
+          catalogSources(access, profileId, a.provider).catch(() => []),
+        ]);
+        // If the profile never organized its home, the remote items are empty.
+        // We do NOT fabricate a default order: the user must set it from the app
+        // or the official site. The empty list is surfaced as-is to the client.
+        return json(res, { provider: providerOf(a.provider).id, home, collections: cols, catalogs });
+      }
+      if (route === "/api/collections/save") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const a = account(b.accountId);
+        const profileId = Number(b.profileId);
+        await assertProfile(a.id, profileId);
+        assert(Array.isArray(b.collections), "Liste de collections invalide", 400);
+        let backupId = null;
+        try {
+          backupId = await backup(a, "Modification des collections");
+        } catch {
+          /* Tuvora may not expose the backup RPC; the save still proceeds. */
+        }
+        const result = await pushCollections(await token(a), profileId, b.collections, a.provider, originId(a));
+        statisticsCache.clear();
+        return json(res, { ok: true, result, backupId });
+      }
+      if (route === "/api/catalogs/save") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const a = account(b.accountId);
+        const profileId = Number(b.profileId);
+        await assertProfile(a.id, profileId);
+        assert(b.settings && Array.isArray(b.settings.items), "Réglages de catalogues invalides", 400);
+        const settingsJson = {
+          hide_unreleased_content: Boolean(b.settings.hide_unreleased_content),
+          items: b.settings.items,
+        };
+        const result = await pushHomeCatalogSettings(await token(a), profileId, settingsJson, a.provider, originId(a));
+        return json(res, { ok: true, result });
+      }
       if (route === "/api/statistics") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
         const days = Number(url.searchParams.get("days") ?? 30);
@@ -1292,6 +1337,8 @@ const server = http.createServer(async (req, res) => {
         const a = account(b.accountId),
           target = await profile(await token(a), Number(b.profileId), a.provider);
         let desired = b.desired;
+        const extra = {};
+        const extraDiff = [];
         if (b.source) {
           assert(
             b.source.accountId !== b.accountId ||
@@ -1299,11 +1346,9 @@ const server = http.createServer(async (req, res) => {
             "Choisis un profil différent",
           );
           const sourceAccount = account(b.source.accountId);
-          const source = await profile(
-            await token(sourceAccount),
-            Number(b.source.profileId),
-            sourceAccount.provider,
-          );
+          const sourceToken = await token(sourceAccount);
+          const sourceProfileId = Number(b.source.profileId);
+          const source = await profile(sourceToken, sourceProfileId, sourceAccount.provider);
           desired = {};
           for (const part of ["tv", "mobile"])
             if (b.selection?.[part])
@@ -1324,6 +1369,25 @@ const server = http.createServer(async (req, res) => {
                     ),
                   ]
                 : writableList(source[part]);
+          // Home catalogs + collections use their own RPCs (not the diff pipeline),
+          // so they are carried on the plan and shown as a summary row each.
+          const targetToken = await token(a);
+          if (b.selection?.catalogs) {
+            const srcHome = await homeCatalogSettings(sourceToken, sourceProfileId, sourceAccount.provider);
+            if (srcHome.items.length) {
+              extra.catalogs = { hide_unreleased_content: srcHome.hideUnreleasedContent, items: srcHome.items };
+              const tgtHome = await homeCatalogSettings(targetToken, Number(b.profileId), a.provider);
+              extraDiff.push({ path: ["catalogs"], before: tgtHome.items.length, after: srcHome.items.length });
+            }
+          }
+          if (b.selection?.collections) {
+            const srcCols = await collections(sourceToken, sourceProfileId, sourceAccount.provider);
+            const tgtCols = await collections(targetToken, Number(b.profileId), a.provider);
+            if (srcCols.length || tgtCols.length) {
+              extra.collections = srcCols;
+              extraDiff.push({ path: ["collections"], before: tgtCols.length, after: srcCols.length });
+            }
+          }
         }
         if (b.assignment) {
           const item = state.library.find((x) => x.id === b.assignment.id);
@@ -1350,7 +1414,7 @@ const server = http.createServer(async (req, res) => {
             "Le profil a changé. Recharge avant de sauvegarder.",
             409,
           );
-        const diff = changes(before, desired);
+        const diff = [...changes(before, desired), ...extraDiff];
         const id = crypto.randomUUID();
         plans.set(id, {
           accountId: a.id,
@@ -1358,6 +1422,7 @@ const server = http.createServer(async (req, res) => {
           target,
           desired,
           before,
+          extra,
           expires: Date.now() + 10 * 60000,
         });
         return json(res, { id, diff, count: diff.length });
@@ -1418,6 +1483,17 @@ const server = http.createServer(async (req, res) => {
                 a.provider,
               );
             completed.push(part);
+          }
+          // Home catalogs + collections: pushed via their own RPCs after the
+          // settings parts (so addons are in place first when catalogs reference them).
+          if (p.extra?.catalogs) {
+            await pushHomeCatalogSettings(t, p.profileId, p.extra.catalogs, a.provider, originId(a));
+            completed.push("catalogs");
+          }
+          if (p.extra?.collections) {
+            await pushCollections(t, p.profileId, p.extra.collections, a.provider, originId(a));
+            statisticsCache.clear();
+            completed.push("collections");
           }
           return json(res, { ok: true, completed, backupId });
         } catch (e) {
@@ -1508,6 +1584,7 @@ const server = http.createServer(async (req, res) => {
       "/connections.js": "connections.js",
       "/iptv.js": "iptv.js",
       "/sports.js": "sports.js",
+      "/collections.js": "collections.js",
       "/theme.js": "theme.js",
       "/catalog.js": "catalog.js",
       "/settings-controls.js": "settings-controls.js",
