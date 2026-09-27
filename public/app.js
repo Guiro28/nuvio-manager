@@ -1071,7 +1071,7 @@ function identityEditor() {
 }
 function createProfile() {
   openDialog(
-    `<h2>${esc(t("Nouveau profil"))}</h2><form id="new-profile" class="form"><label>${esc(t("Nom"))}<input name="name" required></label><div class="dialog-actions"><button type="button" data-close>${esc(t("Annuler"))}</button><button class="primary">${esc(t("Créer dans Nuvio"))}</button></div></form>`,
+    `<h2>${esc(t("Nouveau profil"))}</h2><form id="new-profile" class="form"><label>${esc(t("Nom"))}<input name="name" required></label><div class="dialog-actions"><button type="button" data-close>${esc(t("Annuler"))}</button><button class="primary">${esc(t("Créer"))}</button></div></form>`,
   );
   $("#new-profile").onsubmit = (e) => {
     e.preventDefault();
@@ -1187,7 +1187,7 @@ async function preview(data) {
     ? `<p class="copy-warning">${esc(t("⚠ Cette copie supprime des données de la destination (collections, catalogues ou addons retirés). Vérifie bien le sens de la copie avant de valider."))}</p>`
     : "";
   openDialog(
-    `<h2>${esc(t(result.count > 1 ? "{n} modifications à vérifier" : "{n} modification à vérifier", { n: result.count }))}</h2>${direction}${loss}<p class="muted">${esc(t("Une sauvegarde du compte cible sera créée avant l’enregistrement."))}</p><div class="diff">${renderDiff(result.diff)}</div><div id="apply-error"></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="apply" class="primary">${esc(t("Enregistrer dans Nuvio"))}</button></div>`,
+    `<h2>${esc(t(result.count > 1 ? "{n} modifications à vérifier" : "{n} modification à vérifier", { n: result.count }))}</h2>${direction}${loss}<p class="muted">${esc(t("Une sauvegarde du compte cible sera créée avant l’enregistrement."))}</p><div class="diff">${renderDiff(result.diff)}</div><div id="apply-error"></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="apply" class="primary">${esc(t("Enregistrer"))}</button></div>`,
   );
   $("#apply").onclick = async () => {
     const button = $("#apply");
