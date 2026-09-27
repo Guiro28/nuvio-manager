@@ -977,7 +977,18 @@ const server = http.createServer(async (req, res) => {
         const a = account(b.accountId);
         assert(providerOf(a.provider).id === "tuvora", "Réservé aux comptes Tuvora", 400);
         assert(Array.isArray(b.leagues) && Array.isArray(b.teams), "Sélection sport invalide", 400);
-        const result = await pushRadar(await token(a), Number(b.profileId), b.leagues, b.teams, a.provider);
+        const profileId = Number(b.profileId);
+        // p_prefs is required by the RPC but not editable here: round-trip the
+        // current radar_prefs rows so saving follows never wipes preferences.
+        const current = await radarFollows(await token(a), profileId, a.provider);
+        const result = await pushRadar(
+          await token(a),
+          profileId,
+          b.leagues,
+          b.teams,
+          current.prefs,
+          a.provider,
+        );
         return json(res, { ok: true, result });
       }
       if (route === "/api/sports/search") {

@@ -196,19 +196,29 @@ export async function radarFollows(token, id, providerId) {
       "GET",
       providerId,
     ).catch(() => []);
-  const [leagues, teams] = await Promise.all([
+  const [leagues, teams, prefs] = await Promise.all([
     listOf("radar_follows"),
     listOf("radar_team_follows"),
+    listOf("radar_prefs"),
   ]);
   return {
     leagues: Array.isArray(leagues) ? leagues : [],
     teams: Array.isArray(teams) ? teams : [],
+    prefs: Array.isArray(prefs) ? prefs : [],
   };
 }
-export async function pushRadar(token, id, leagues, teams, providerId) {
+// The RPC signature is sync_push_radar(p_follows, p_prefs, p_profile_id, p_teams):
+// p_prefs (the radar_prefs rows) is required. We don't edit prefs in this
+// dashboard, so we round-trip whatever was pulled to avoid wiping them.
+export async function pushRadar(token, id, leagues, teams, prefs, providerId) {
   return rpc(
     "sync_push_radar",
-    { p_profile_id: id, p_follows: leagues, p_teams: teams },
+    {
+      p_profile_id: id,
+      p_follows: leagues,
+      p_teams: teams,
+      p_prefs: Array.isArray(prefs) ? prefs : [],
+    },
     token,
     providerId,
   );
