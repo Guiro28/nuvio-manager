@@ -280,11 +280,36 @@ export async function pushHomeCatalogSettings(token, id, settingsJson, providerI
 
 // Reference of catalogs available to add as sources / to order on the home:
 // the profile's installed addons plus each manifest's declared catalogs.
+// Manifest fetches are cached and time-boxed: an addon on an unreachable host
+// (e.g. a LAN IP the server can't reach) must fail fast instead of hanging the
+// whole catalog request. Successes are cached longer than failures.
+const manifestCache = new Map();
+const MANIFEST_TIMEOUT_MS = 5000;
+const MANIFEST_TTL_OK = 10 * 60 * 1000;
+const MANIFEST_TTL_ERR = 60 * 1000;
+
 async function fetchManifest(baseUrl) {
   const url = baseUrl.replace(/\/?$/, "/") + "manifest.json";
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`Manifest ${response.status}`);
-  return response.json();
+  const cached = manifestCache.get(url);
+  if (cached && cached.expires > Date.now()) {
+    if (cached.error) throw new Error(cached.error);
+    return cached.data;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MANIFEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { headers: { accept: "application/json" }, signal: controller.signal });
+    if (!response.ok) throw new Error(`Manifest ${response.status}`);
+    const data = await response.json();
+    manifestCache.set(url, { data, expires: Date.now() + MANIFEST_TTL_OK });
+    return data;
+  } catch (error) {
+    const message = error.name === "AbortError" ? "Manifest timeout" : error.message;
+    manifestCache.set(url, { error: message, expires: Date.now() + MANIFEST_TTL_ERR });
+    throw new Error(message);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const catalogIsSearchOnly = (catalog) =>

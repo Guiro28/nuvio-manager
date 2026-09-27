@@ -1339,4 +1339,8 @@ export default {
   "Aucun réglage d’accueil synchronisé pour ce profil. Organisez l’ordre des catalogues depuis l’application Nuvio ou le site officiel, puis rechargez cette page.": "Keine synchronisierten Startseiten-Einstellungen für dieses Profil. Organisieren Sie die Katalogreihenfolge in der Nuvio-App oder auf der offiziellen Website und laden Sie diese Seite dann neu.",
   "Catalogues d’accueil (ordre et activation)": "Startseiten-Kataloge (Reihenfolge und Aktivierung)",
   "Collections (dossiers et sources)": "Sammlungen (Ordner und Quellen)",
+  "Compte restauré (mode repli : réglages restaurés, historique conservé).": "Konto wiederhergestellt (Fallback-Modus: Einstellungen wiederhergestellt, Verlauf beibehalten).",
+  "Restauration partielle en mode repli : {n} élément(s) non restauré(s). L’historique n’est pas modifié.": "Teilweise Wiederherstellung im Fallback-Modus: {n} Element(e) nicht wiederhergestellt. Der Verlauf bleibt unverändert.",
+  "Copie de {source} vers {destination}": "Kopie von {source} nach {destination}",
+  "⚠ Cette copie supprime des données de la destination (collections, catalogues ou addons retirés). Vérifie bien le sens de la copie avant de valider.": "⚠ Diese Kopie entfernt Daten vom Ziel (Sammlungen, Kataloge oder Add-ons entfernt). Prüfe die Kopierrichtung, bevor du bestätigst.",
 };

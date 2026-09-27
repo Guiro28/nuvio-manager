@@ -1354,4 +1354,8 @@ export default {
   "Aucun réglage d’accueil synchronisé pour ce profil. Organisez l’ordre des catalogues depuis l’application Nuvio ou le site officiel, puis rechargez cette page.": "No synced home settings for this profile. Organize the catalog order from the Nuvio app or the official website, then reload this page.",
   "Catalogues d’accueil (ordre et activation)": "Home catalogs (order and toggles)",
   "Collections (dossiers et sources)": "Collections (folders and sources)",
+  "Compte restauré (mode repli : réglages restaurés, historique conservé).": "Account restored (fallback mode: settings restored, history kept).",
+  "Restauration partielle en mode repli : {n} élément(s) non restauré(s). L’historique n’est pas modifié.": "Partial restore in fallback mode: {n} item(s) not restored. History is left unchanged.",
+  "Copie de {source} vers {destination}": "Copy from {source} to {destination}",
+  "⚠ Cette copie supprime des données de la destination (collections, catalogues ou addons retirés). Vérifie bien le sens de la copie avant de valider.": "⚠ This copy removes data from the destination (collections, catalogs or addons dropped). Double-check the copy direction before applying.",
 };

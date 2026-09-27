@@ -151,6 +151,19 @@ function openDialog(html) {
     (b) => (b.onclick = () => d.close()),
   );
 }
+// A restore may run server-side "replace" or fall back to per-item pushes when
+// the hosted RPC denies it; the toast reflects which path ran.
+function restoreToast(result) {
+  if (result?.method === "fallback") {
+    const failed = result.result?.errors?.length || 0;
+    return toast(
+      failed
+        ? t("Restauration partielle en mode repli : {n} élément(s) non restauré(s). L’historique n’est pas modifié.", { n: failed })
+        : t("Compte restauré (mode repli : réglages restaurés, historique conservé)."),
+    );
+  }
+  toast(t("Compte restauré"));
+}
 function accountOptions(id = accountId) {
   return state.accounts
     .map(
@@ -1150,11 +1163,31 @@ function renderDiff(diff) {
       .join("")}</div>`;
   return html;
 }
+// Detect whether the copy removes data from the destination (list items dropped,
+// or catalogs/collections whose count shrinks), so the user can catch a wrong
+// copy direction before applying.
+function diffHasLoss(diff) {
+  return diff.some((d) => {
+    if (["catalogs", "collections"].includes(d.path[0])) return Number(d.after) < Number(d.before);
+    if (["addons", "plugins"].includes(d.path[0])) {
+      const before = Array.isArray(d.before) ? d.before : [];
+      const afterUrls = new Set((Array.isArray(d.after) ? d.after : []).map((x) => x.url));
+      return before.some((x) => !afterUrls.has(x.url));
+    }
+    return false;
+  });
+}
 async function preview(data) {
   const result = await api("preview", data);
   if (!result.count) return toast(t("Aucune modification à appliquer."));
+  const direction = result.sourceName && result.targetName
+    ? `<p class="copy-direction">${esc(t("Copie de {source} vers {destination}", { source: result.sourceName, destination: result.targetName }))}</p>`
+    : "";
+  const loss = diffHasLoss(result.diff)
+    ? `<p class="copy-warning">${esc(t("⚠ Cette copie supprime des données de la destination (collections, catalogues ou addons retirés). Vérifie bien le sens de la copie avant de valider."))}</p>`
+    : "";
   openDialog(
-    `<h2>${esc(t(result.count > 1 ? "{n} modifications à vérifier" : "{n} modification à vérifier", { n: result.count }))}</h2><p class="muted">${esc(t("Une sauvegarde du compte cible sera créée avant l’enregistrement."))}</p><div class="diff">${renderDiff(result.diff)}</div><div id="apply-error"></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="apply" class="primary">${esc(t("Enregistrer dans Nuvio"))}</button></div>`,
+    `<h2>${esc(t(result.count > 1 ? "{n} modifications à vérifier" : "{n} modification à vérifier", { n: result.count }))}</h2>${direction}${loss}<p class="muted">${esc(t("Une sauvegarde du compte cible sera créée avant l’enregistrement."))}</p><div class="diff">${renderDiff(result.diff)}</div><div id="apply-error"></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="apply" class="primary">${esc(t("Enregistrer dans Nuvio"))}</button></div>`,
   );
   $("#apply").onclick = async () => {
     const button = $("#apply");
@@ -1401,10 +1434,10 @@ function renderBackups() {
         }
         openDialog(`<h2>${esc(t("Restaurer cette sauvegarde ?"))}</h2><p>${t("Le fichier <strong>{name}</strong> remplacera les données synchronisées du compte <strong>{account}</strong>.", { name: esc(file.name), account: esc(activeAccount?.name || activeAccount?.email || t("actif")) })}</p><p class="hint warning">${esc(t("Une sauvegarde de sécurité sera créée automatiquement avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="restore-uploaded-backup" class="danger">${esc(t("Restaurer le compte"))}</button></div>`);
         $("#restore-uploaded-backup").onclick = () => run(async () => {
-          await api("backup/restore-file", { accountId, backup: snapshot });
+          const result = await api("backup/restore-file", { accountId, backup: snapshot });
           $("#dialog").close();
           await render();
-          toast(t("Sauvegarde chargée et restaurée"));
+          restoreToast(result);
         });
       };
       input.click();
@@ -1415,10 +1448,10 @@ function renderBackups() {
         target = state.accounts.find((account) => account.id === item?.accountId);
       openDialog(`<h2>${esc(t("Restaurer cette sauvegarde ?"))}</h2><p>${t("Les données synchronisées du compte <strong>{account}</strong> seront remplacées par la sauvegarde du {date}.", { account: esc(target?.name || target?.email || item?.email), date: esc(new Date(item.at).toLocaleString(getLang())) })}</p><p class="hint warning">${esc(t("Une sauvegarde de sécurité sera créée automatiquement avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="restore-backup" class="danger">${esc(t("Restaurer le compte"))}</button></div>`);
       $("#restore-backup").onclick = () => run(async () => {
-        await api("backup/restore", { accountId: item.accountId, id: item.id });
+        const result = await api("backup/restore", { accountId: item.accountId, id: item.id });
         $("#dialog").close();
         await render();
-        toast(t("Compte restauré"));
+        restoreToast(result);
       });
     };
   });

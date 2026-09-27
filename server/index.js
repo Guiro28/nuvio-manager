@@ -383,6 +383,61 @@ async function backup(a, reason) {
     .flatMap((accountId) => pruneBackups(accountId));
   if (expired.length) persistBackups(expired);
 }
+// Fallback restore for hosted instances that deny sync_restore_account_backup:
+// re-push the synced settings from the snapshot via the per-item RPCs. Restores
+// addons, plugins, TV/Mobile settings, home catalogs and collections for every
+// profile; leaves identity, library and watch history untouched.
+async function restoreViaPush(a, snapshot) {
+  const t = await token(a);
+  const data = snapshot?.data || {};
+  const restored = { addons: 0, plugins: 0, settings: 0, catalogs: 0, collections: 0 };
+  const errors = [];
+  const groupByProfile = (rows) => {
+    const map = new Map();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const pid = Number(row.profile_id);
+      if (!Number.isFinite(pid)) continue;
+      if (!map.has(pid)) map.set(pid, []);
+      map.get(pid).push(row);
+    }
+    return map;
+  };
+  const asList = (rows) =>
+    [...rows]
+      .sort((x, y) => (x.sort_order || 0) - (y.sort_order || 0))
+      .map((r, i) => ({ url: r.url, name: String(r.name || ""), enabled: r.enabled !== false, sort_order: i }));
+  const run = async (label, fn) => {
+    try {
+      await fn();
+      return true;
+    } catch (error) {
+      errors.push(`${label}: ${error.message}`);
+      return false;
+    }
+  };
+  for (const [pid, rows] of groupByProfile(data.addons))
+    if (await run(`addons/profil ${pid}`, () => rpc("sync_push_addons", { p_profile_id: pid, p_addons: asList(rows) }, t, a.provider))) restored.addons++;
+  for (const [pid, rows] of groupByProfile(data.plugins))
+    if (await run(`plugins/profil ${pid}`, () => rpc("sync_push_plugins", { p_profile_id: pid, p_plugins: asList(rows) }, t, a.provider))) restored.plugins++;
+  for (const row of Array.isArray(data.collections) ? data.collections : [])
+    if (await run(`collections/profil ${row.profile_id}`, () => rpc("sync_push_collections", { p_profile_id: Number(row.profile_id), p_collections_json: row.collections_json || [] }, t, a.provider))) restored.collections++;
+  for (const row of Array.isArray(data.home_catalog_settings) ? data.home_catalog_settings : [])
+    if (await run(`catalogues/profil ${row.profile_id}`, () => rpc("sync_push_home_catalog_settings", { p_profile_id: Number(row.profile_id), p_platform: row.platform || "home_catalog_shared", p_settings_json: row.settings_json || { items: [] } }, t, a.provider))) restored.catalogs++;
+  for (const row of Array.isArray(data.profile_settings_blobs) ? data.profile_settings_blobs : [])
+    if (
+      await run(`paramètres ${row.platform}/profil ${row.profile_id}`, async () => {
+        const current = (await rpc("sync_pull_profile_settings_blob", { p_profile_id: Number(row.profile_id), p_platform: row.platform }, t, a.provider))[0];
+        await rpc(
+          "sync_push_profile_settings_blob_guarded",
+          { p_profile_id: Number(row.profile_id), p_platform: row.platform, p_settings_json: row.settings_json, p_expected_updated_at: current?.updated_at || null },
+          t,
+          a.provider,
+        );
+      })
+    )
+      restored.settings++;
+  return { restored, errors };
+}
 function normalizeUrl(value) {
   const u = new URL(String(value || "").replace(/^stremio:\/\//i, "https://"));
   assert(
@@ -1339,6 +1394,7 @@ const server = http.createServer(async (req, res) => {
         let desired = b.desired;
         const extra = {};
         const extraDiff = [];
+        let sourceName = null, targetName = null;
         if (b.source) {
           assert(
             b.source.accountId !== b.accountId ||
@@ -1349,6 +1405,8 @@ const server = http.createServer(async (req, res) => {
           const sourceToken = await token(sourceAccount);
           const sourceProfileId = Number(b.source.profileId);
           const source = await profile(sourceToken, sourceProfileId, sourceAccount.provider);
+          sourceName = source.identity?.name || null;
+          targetName = target.identity?.name || null;
           desired = {};
           for (const part of ["tv", "mobile"])
             if (b.selection?.[part])
@@ -1382,8 +1440,10 @@ const server = http.createServer(async (req, res) => {
           }
           if (b.selection?.collections) {
             const srcCols = await collections(sourceToken, sourceProfileId, sourceAccount.provider);
-            const tgtCols = await collections(targetToken, Number(b.profileId), a.provider);
-            if (srcCols.length || tgtCols.length) {
+            // Never wipe the destination's collections with an empty source
+            // (mirrors the catalogs guard): an empty source is skipped, not copied.
+            if (srcCols.length) {
+              const tgtCols = await collections(targetToken, Number(b.profileId), a.provider);
               extra.collections = srcCols;
               extraDiff.push({ path: ["collections"], before: tgtCols.length, after: srcCols.length });
             }
@@ -1425,7 +1485,7 @@ const server = http.createServer(async (req, res) => {
           extra,
           expires: Date.now() + 10 * 60000,
         });
-        return json(res, { id, diff, count: diff.length });
+        return json(res, { id, diff, count: diff.length, sourceName, targetName });
       }
       if (route === "/api/apply") {
         const p = plans.get(b.id);
@@ -1536,14 +1596,24 @@ const server = http.createServer(async (req, res) => {
           snapshot = validateBackupSnapshot(db.read("backup-" + item.id, null));
         }
         const safetyBackupId = await backup(a, "Avant restauration");
-        const result = await rpc(
-          "sync_restore_account_backup",
-          { p_backup: snapshot, p_mode: "replace" },
-          await token(a),
-          a.provider,
-        );
+        let result, method = "rpc", rpcError = null;
+        try {
+          result = await rpc(
+            "sync_restore_account_backup",
+            { p_backup: snapshot, p_mode: "replace" },
+            await token(a),
+            a.provider,
+          );
+        } catch (error) {
+          // Some hosted Nuvio instances deny the replace RPC ("permission denied").
+          // Fall back to restoring the synced settings via the per-item push RPCs,
+          // which are allowed. History/library are left untouched on purpose.
+          rpcError = error.message;
+          result = await restoreViaPush(a, snapshot);
+          method = "fallback";
+        }
         statisticsCache.clear();
-        return json(res, { ok: true, result, safetyBackupId });
+        return json(res, { ok: true, result, method, rpcError, safetyBackupId });
       }
       if (route === "/api/backup/download") {
         const id = url.searchParams.get("id");
