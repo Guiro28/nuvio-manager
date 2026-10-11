@@ -88,6 +88,13 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     state.proxyAddons = [];
     save();
   }
+  // Per-assignment relay grants: one unique, revocable token per
+  // (account, profile, upstream manifest, mode). Legacy `proxyAddons` entries
+  // (shared 10-hex ids) keep resolving so already-saved URLs still work.
+  if (!Array.isArray(state.proxyGrants)) {
+    state.proxyGrants = [];
+    save();
+  }
   if (!state.bandwidth || typeof state.bandwidth !== "object") state.bandwidth = {};
   state.bandwidth.direct = Number(state.bandwidth.direct) || 0;
   state.bandwidth.warp = Number(state.bandwidth.warp) || 0;
@@ -104,14 +111,31 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
   };
   const metrics = () => ({ direct: state.bandwidth.direct, warp: state.bandwidth.warp });
 
-  const getAddon = (id) => state.proxyAddons.find((addon) => addon.id === id);
+  // Resolve a relay token to its grant (new) or legacy addon. Revoked grants are
+  // returned too (callers decide): the relay refuses them, but clone/describe
+  // still need their manifestUrl, which is why grants are soft-deleted.
+  const getGrant = (token) =>
+    state.proxyGrants.find((g) => g.id === token) ||
+    state.proxyAddons.find((a) => a.id === token) ||
+    null;
 
-  async function register(item, mode) {
-    if (!MODES.has(mode)) throw new Error("Mode proxy invalide");
-    const manifestUrl = normalizeManifestUrl(item.url);
-    let addon = state.proxyAddons.find((entry) => entry.manifestUrl === manifestUrl);
-    if (addon) return addon;
+  // Extract {mode, token} from one of our own relay URLs (any host).
+  const RELAY_RE = /\/relay\/(direct|warp)\/([a-f0-9]{10}|[a-f0-9]{32})\/manifest\.json(?:$|\?)/i;
+  const relayRef = (url) => {
+    const m = RELAY_RE.exec(String(url || ""));
+    return m ? { mode: m[1], token: m[2] } : null;
+  };
+  // For cloning: resolve a relay URL back to its upstream so the target can be
+  // given a fresh, target-owned grant. Returns null for non-relay URLs.
+  const describe = (url) => {
+    const ref = relayRef(url);
+    if (!ref) return null;
+    const grant = getGrant(ref.token);
+    if (!grant) return null;
+    return { mode: ref.mode, manifestUrl: grant.manifestUrl, name: grant.name, logo: grant.logo || "" };
+  };
 
+  async function fetchMeta(manifestUrl, mode, item) {
     const { res } = await request(manifestUrl, {
       upstream: upstreamFor(mode, configuredProxy()),
       headers: { accept: "application/json" },
@@ -119,17 +143,99 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     });
     const manifest = JSON.parse((await readAll(res)).toString("utf8"));
     if (!manifest?.id) throw new Error("Manifest sans identifiant");
-    addon = {
-      id: crypto.randomBytes(5).toString("hex"),
+    return {
       name: String(manifest.name || item.name || manifest.id),
       displayName: `${String(item.name || manifest.name || manifest.id)} (proxy)`,
-      manifestUrl,
       logo: String(manifest.logo || item.logo || ""),
+    };
+  }
+
+  // Register a relay entry. With {accountId, profileId} context, mint/reuse a
+  // per-assignment grant (unique revocable token). Without context, fall back to
+  // the legacy shared-by-manifest addon (kept for back-compat).
+  async function register(item, mode, ctx) {
+    if (!MODES.has(mode)) throw new Error("Mode proxy invalide");
+    const manifestUrl = normalizeManifestUrl(item.url);
+    if (ctx && ctx.accountId != null && ctx.profileId != null) {
+      const existing = state.proxyGrants.find(
+        (g) =>
+          !g.revoked &&
+          g.accountId === ctx.accountId &&
+          g.profileId === ctx.profileId &&
+          g.manifestUrl === manifestUrl &&
+          g.mode === mode,
+      );
+      if (existing) return existing;
+      const meta = await fetchMeta(manifestUrl, mode, item);
+      const grant = {
+        id: crypto.randomBytes(16).toString("hex"),
+        accountId: ctx.accountId,
+        profileId: ctx.profileId,
+        manifestUrl,
+        mode,
+        name: meta.name,
+        displayName: meta.displayName,
+        logo: meta.logo,
+        createdAt: new Date().toISOString(),
+        revoked: false,
+      };
+      state.proxyGrants.push(grant);
+      save();
+      return grant;
+    }
+    let addon = state.proxyAddons.find((entry) => entry.manifestUrl === manifestUrl);
+    if (addon) return addon;
+    const meta = await fetchMeta(manifestUrl, mode, item);
+    addon = {
+      id: crypto.randomBytes(5).toString("hex"),
+      name: meta.name,
+      displayName: meta.displayName,
+      manifestUrl,
+      logo: meta.logo,
       addedAt: new Date().toISOString(),
     };
     state.proxyAddons.push(addon);
     save();
     return addon;
+  }
+
+  // Revoke every live grant of an account (called when it leaves the manager).
+  function revokeAccount(accountId) {
+    let n = 0;
+    const at = new Date().toISOString();
+    for (const g of state.proxyGrants)
+      if (!g.revoked && g.accountId === accountId) {
+        g.revoked = true;
+        g.revokedAt = at;
+        n++;
+      }
+    if (n) save();
+    return n;
+  }
+
+  // Revoke grants of a (account, profile) whose token is no longer present in the
+  // profile's current addon list — catches removals done in or outside the manager.
+  function reconcile(accountId, profileId, activeUrls) {
+    const live = new Set();
+    for (const u of activeUrls || []) {
+      const ref = relayRef(u);
+      if (ref) live.add(ref.token);
+    }
+    let n = 0;
+    const at = new Date().toISOString();
+    for (const g of state.proxyGrants)
+      if (
+        !g.revoked &&
+        g.accountId === accountId &&
+        g.profileId === profileId &&
+        !live.has(g.id)
+      ) {
+        g.revoked = true;
+        g.revokedAt = at;
+        n++;
+      }
+    if (n) save();
+    return n;
   }
 
   async function checkProxy(proxyUrl = configuredProxy()) {
@@ -175,7 +281,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
 
   async function handle(req, res, url) {
     const match = url.pathname.match(
-      /^\/relay\/(direct|warp)\/(play|([a-f0-9]{10})\/(.+))$/,
+      /^\/relay\/(direct|warp)\/(play|([a-f0-9]{10}|[a-f0-9]{32})\/(.+))$/,
     );
     if (!match) return false;
 
@@ -222,10 +328,15 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         return true;
       }
 
-      const addon = getAddon(match[3]);
+      const addon = getGrant(match[3]);
       if (!addon) {
         res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ error: "Addon inconnu" }));
+        return true;
+      }
+      if (addon.revoked) {
+        res.writeHead(410, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Lien révoqué" }));
         return true;
       }
       const restPath = match[4];
@@ -264,5 +375,5 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     }
   }
 
-  return { handle, register, status, test, metrics };
+  return { handle, register, status, test, metrics, describe, revokeAccount, reconcile };
 }

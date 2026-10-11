@@ -250,7 +250,9 @@ async function overview() {
     accounts: state.accounts.length,
     profiles: await totalProfiles(),
     libraryAddons: state.library.length,
-    proxyAddons: state.proxyAddons?.length || 0,
+    proxyAddons:
+      (state.proxyAddons?.length || 0) +
+      (state.proxyGrants?.filter((g) => !g.revoked).length || 0),
     trakt: connections.filter((c) => c?.trakt).length,
     simkl: connections.filter((c) => c?.simkl).length,
     backups: state.backups.length,
@@ -446,12 +448,36 @@ function normalizeUrl(value) {
   );
   return u.href;
 }
-async function installation(item, mode) {
+async function installation(item, mode, ctx) {
   if (mode === "none") return item.url;
   assert(["direct", "warp"].includes(mode), "Mode proxy invalide");
-  const addon = await addonProxy.register(item, mode);
+  const addon = await addonProxy.register(item, mode, ctx);
   return `${publicOrigin()}/relay/${mode}/${addon.id}/manifest.json`;
 }
+// Clone helper: give the target profile its own relay grants. Each proxied addon
+// copied from the source is re-minted so the target gets a unique, revocable URL
+// (deleting the source never breaks the clone). Non-relay URLs pass through.
+async function remapRelayAddons(rows, ctx) {
+  const out = [];
+  for (const row of rows) {
+    const ref = addonProxy.describe(row.url);
+    if (ref) {
+      const url = await installation(
+        { url: ref.manifestUrl, name: row.name, logo: ref.logo },
+        ref.mode,
+        ctx,
+      );
+      out.push({ ...row, url });
+    } else out.push(row);
+  }
+  return out;
+}
+// Merge-dedup key: two relay URLs for the same upstream addon+mode collapse to
+// one even though their tokens differ per profile.
+const addonUpstreamKey = (url) => {
+  const ref = addonProxy.describe(url);
+  return ref ? `${ref.mode}|${ref.manifestUrl}` : url;
+};
 const writableList = (rows) =>
   rows.map((r, i) => ({
     url: normalizeUrl(r.url),
@@ -909,6 +935,9 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/accounts/remove") {
         const a = account(b.accountId);
         state.accounts = state.accounts.filter((x) => x !== a);
+        // Kill every relay link of this account so already-saved proxy URLs stop
+        // working as soon as it leaves the manager.
+        addonProxy.revokeAccount(a.id);
         const prefix = `${a.id}:`;
         if (Array.isArray(panel.adminAccounts))
           panel.adminAccounts = panel.adminAccounts.filter((id) => id !== a.id);
@@ -1256,14 +1285,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (route === "/api/profile") {
         const a = account(url.searchParams.get("accountId"));
-        return json(
-          res,
-          await profile(
-            await token(a),
-            Number(url.searchParams.get("profileId")),
-            a.provider,
-          ),
-        );
+        const profileId = Number(url.searchParams.get("profileId"));
+        const data = await profile(await token(a), profileId, a.provider);
+        // Revoke relay grants whose addon is no longer in the profile's list.
+        addonProxy.reconcile(a.id, profileId, (data.addons || []).map((x) => x.url));
+        return json(res, data);
       }
       if (route === "/api/profile/identity") {
         const a = account(b.accountId);
@@ -1428,16 +1454,27 @@ const server = http.createServer(async (req, res) => {
                     b.selection[part],
                   )
                 : source[part].settings_json;
-          for (const part of ["addons", "plugins"])
-            if (b.selection?.[part])
-              desired[part] = b.merge
-                ? [
-                    ...writableList(target[part]),
-                    ...writableList(source[part]).filter(
-                      (x) => !target[part].some((y) => y.url === x.url),
-                    ),
-                  ]
-                : writableList(source[part]);
+          for (const part of ["addons", "plugins"]) {
+            if (!b.selection?.[part]) continue;
+            let srcRows = writableList(source[part]);
+            // Addons may carry relay URLs: re-mint them so the target owns its
+            // own revocable grants instead of pointing at the source's.
+            if (part === "addons")
+              srcRows = await remapRelayAddons(srcRows, {
+                accountId: a.id,
+                profileId: Number(b.profileId),
+              });
+            if (!b.merge) {
+              desired[part] = srcRows;
+              continue;
+            }
+            const keyOf = part === "addons" ? addonUpstreamKey : (u) => u;
+            const have = new Set(writableList(target[part]).map((y) => keyOf(y.url)));
+            desired[part] = [
+              ...writableList(target[part]),
+              ...srcRows.filter((x) => !have.has(keyOf(x.url))),
+            ];
+          }
           // Home catalogs + collections use their own RPCs (not the diff pipeline),
           // so they are carried on the plan and shown as a summary row each.
           const targetToken = await token(a);
@@ -1463,7 +1500,10 @@ const server = http.createServer(async (req, res) => {
         if (b.assignment) {
           const item = state.library.find((x) => x.id === b.assignment.id);
           assert(item, "Addon introuvable");
-          const installUrl = await installation(item, b.assignment.mode);
+          const installUrl = await installation(item, b.assignment.mode, {
+            accountId: a.id,
+            profileId: Number(b.profileId),
+          });
           const rows = writableList(target.addons);
           const existing = rows.find((x) => x.url === installUrl);
           if (!existing)
@@ -1566,6 +1606,10 @@ const server = http.createServer(async (req, res) => {
             statisticsCache.clear();
             completed.push("collections");
           }
+          // After the addon list is written, revoke grants for any addon just
+          // removed from this profile (immediate, without waiting for a reload).
+          if (p.desired.addons)
+            addonProxy.reconcile(p.accountId, p.profileId, p.desired.addons.map((x) => x.url));
           return json(res, { ok: true, completed, backupId });
         } catch (e) {
           return json(
