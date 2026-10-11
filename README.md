@@ -15,7 +15,7 @@ Dashboard auto-hébergé pour gérer plusieurs comptes et profils [Nuvio](https:
 
 ### Réglages & contenu
 
-- Réglages **Apple TV** et **Mobile** par profil.
+- Réglages **TV** et **Mobile** par profil.
 - **Catalogues d’accueil** : ordre d’affichage, activation, titres personnalisés.
 - **Collections** : création et édition complète (dossiers, sources Addon / TMDB / Trakt), à l’image du dashboard officiel.
 - **Bibliothèque d’addons** avec attribution par profil.
