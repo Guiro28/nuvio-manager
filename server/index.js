@@ -2,6 +2,7 @@ import { hashPassword, verifyPassword } from "./panel-auth.js";
 import { activity } from "./activity.js";
 import { enrichActivity } from "./tmdb.js";
 import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
+import { createHistoryStore } from "./history-store.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestLogo } from "./manifest.js";
 import { createIntegratedProxy, normalizeProxyUrl, proxySummary } from "./integrated-proxy.js";
@@ -184,6 +185,21 @@ const requestLang = (req) => {
 };
 const trackerConfig = (service) => panel.trackerApps?.[service] || {};
 const savePanel = () => db.write("panel-settings", panel);
+
+// Background mirror of every profile's history; stats and the history tab read
+// from it so they render instantly regardless of how many profiles exist.
+const historyStore = createHistoryStore({
+  load: () => db.read("history-store", { version: 1, profiles: {}, lastFullSync: 0 }),
+  save: (value) => db.write("history-store", value),
+  getAccounts: () => state.accounts,
+  getToken: token,
+  getProfiles: profileList,
+  rpc,
+  call,
+  externalHistory,
+  getIntervalMinutes: () => Number(panel.historySyncMinutes) || 30,
+  isEnabled: () => panel.historySyncEnabled !== false,
+});
 // Background sampling of process CPU% and RSS, kept as a 1-week history in the
 // data volume for the home-page chart. A single sampler owns the cpuUsage delta
 // so nothing else has to recompute it.
@@ -701,6 +717,7 @@ const server = http.createServer(async (req, res) => {
       const ADMIN_ONLY = new Set([
         "/api/settings", "/api/settings/tmdb", "/api/settings/proxy", "/api/settings/public-url",
         "/api/settings/proxy/test", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
+        "/api/settings/history", "/api/history/status", "/api/history/sync",
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
@@ -753,7 +770,34 @@ const server = http.createServer(async (req, res) => {
               clientId: panel.trackerApps?.simkl?.clientId || "",
             },
           },
+          history: {
+            enabled: panel.historySyncEnabled !== false,
+            intervalMinutes: Number(panel.historySyncMinutes) || 30,
+            lastFullSync: historyStore.status().lastFullSync,
+          },
         });
+      }
+      if (route === "/api/settings/history") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        if (typeof b.enabled === "boolean") panel.historySyncEnabled = b.enabled;
+        if (b.intervalMinutes !== undefined) {
+          const minutes = Number(b.intervalMinutes);
+          assert(Number.isInteger(minutes) && minutes >= 5 && minutes <= 1440, "Intervalle entre 5 et 1440 minutes");
+          panel.historySyncMinutes = minutes;
+        }
+        savePanel();
+        historyStore.reschedule();
+        return json(res, { ok: true, enabled: panel.historySyncEnabled !== false, intervalMinutes: Number(panel.historySyncMinutes) || 30 });
+      }
+      if (route === "/api/history/status") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        return json(res, historyStore.status());
+      }
+      if (route === "/api/history/sync") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        await historyStore.syncAll({ force: true });
+        statisticsCache.clear();
+        return json(res, historyStore.status());
       }
       if (route === "/api/settings/tmdb") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
@@ -956,6 +1000,7 @@ const server = http.createServer(async (req, res) => {
         // Kill every relay link of this account so already-saved proxy URLs stop
         // working as soon as it leaves the manager.
         addonProxy.revokeAccount(a.id);
+        historyStore.pruneAccount(a.id);
         const prefix = `${a.id}:`;
         if (Array.isArray(panel.adminAccounts))
           panel.adminAccounts = panel.adminAccounts.filter((id) => id !== a.id);
@@ -982,7 +1027,16 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/activity") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
         const activityAccount = account(url.searchParams.get("accountId"));
-        const result = await activity(await token(activityAccount), Number(url.searchParams.get("profileId")), url.searchParams.get("kind"), Number(url.searchParams.get("page") || 1), activityAccount.provider);
+        const profileId = Number(url.searchParams.get("profileId"));
+        const kind = url.searchParams.get("kind");
+        const page = Number(url.searchParams.get("page") || 1);
+        const ref = `${activityAccount.id}:${profileId}`;
+        // Served from the local mirror; a manual refresh re-syncs just this
+        // profile first, and a not-yet-synced profile falls back to a live read.
+        if (url.searchParams.has("refresh")) await historyStore.syncProfile(ref);
+        let result = historyStore.getActivity(ref, kind, page);
+        if (!result)
+          result = await activity(await token(activityAccount), profileId, kind, page, activityAccount.provider);
         return json(res, await enrichActivity(result, {
           key: panel.tmdbKey,
           cache: tmdbCache,
@@ -1108,12 +1162,17 @@ const server = http.createServer(async (req, res) => {
         const cached = statisticsCache.get(cacheKey);
         if (!url.searchParams.has("refresh") && cached?.expiresAt > Date.now())
           return json(res, cached.value);
-        const dataset = await collectNuvioStatistics(statsAccounts, {
-          getToken: token,
-          rpc,
-          externalHistory,
-          getProfiles: profileList,
-        });
+        // Serve from the local mirror. A manual refresh forces a sync first; the
+        // very first load (empty store) falls back to a live collect.
+        if (url.searchParams.has("refresh") && isAdmin) await historyStore.syncAll({ force: true });
+        let dataset = historyStore.getDataset(statsAccounts);
+        if (!dataset.length && !historyStore.hasData(statsAccounts))
+          dataset = await collectNuvioStatistics(statsAccounts, {
+            getToken: token,
+            rpc,
+            externalHistory,
+            getProfiles: profileList,
+          });
         // Profiles that opted out of their own app history (Nuvio or Tuvora)
         // keep only Trakt/Simkl.
         const nuvioDisabled = panel.statsNuvioDisabled || {};
@@ -1774,6 +1833,8 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(port, host, () => {
   console.log(`Nuvio Manager : http://localhost:${server.address().port}`);
+  // Start the background history mirror (initial fill + periodic refresh).
+  if (!setupRequired()) historyStore.start();
   if (setupRequired()) {
     console.log("Configuration initiale requise.");
     console.log(`Code de configuration : ${setupCode}`);

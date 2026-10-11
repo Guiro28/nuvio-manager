@@ -8,6 +8,9 @@ const esc = (value) => String(value ?? "").replace(
 export async function renderPanelSettings(container, { api, run, toast, onSaved }) {
   const config = await api("settings");
   const proxy = config.externalProxy || {};
+  const history = config.history || { enabled: true, intervalMinutes: 30, lastFullSync: 0 };
+  const lastSyncLabel = (ms) =>
+    ms ? t("Dernière synchronisation : {date}", { date: new Date(ms).toLocaleString() }) : t("Jamais synchronisé.");
   container.innerHTML = `
     <section class="panel">
       <h2>TMDB</h2>
@@ -56,6 +59,18 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
         <label>${esc(t("Client ID / clé API"))}<input name="simklClientId" value="${esc(config.trackers?.simkl?.clientId)}" autocomplete="off" maxlength="4096"></label>
         <button class="primary">${esc(t("Enregistrer les applications"))}</button>
         <p class="muted">${esc(t("Associe ensuite Trakt ou Simkl depuis l’onglet dédié de chaque profil."))}</p>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>${esc(t("Synchronisation de l’historique"))}</h2>
+      <p class="muted">${esc(t("Le manager garde une copie locale de l’historique de chaque profil (visionnages, progression, bibliothèque, Trakt et Simkl) et la rafraîchit automatiquement, pour afficher les statistiques et l’historique instantanément."))}</p>
+      <p id="history-last">${esc(lastSyncLabel(history.lastFullSync))}</p>
+      <form id="history-form" class="form">
+        <label class="check-label"><input type="checkbox" name="enabled" ${history.enabled ? "checked" : ""}>${esc(t("Activer la synchronisation automatique"))}</label>
+        <label>${esc(t("Intervalle (minutes)"))}<input name="intervalMinutes" type="number" min="5" max="1440" step="1" value="${esc(history.intervalMinutes)}" required></label>
+        <div class="actions"><button class="primary">${esc(t("Enregistrer"))}</button><button type="button" id="history-sync">${esc(t("Synchroniser maintenant"))}</button></div>
+        <p id="history-result" class="muted"></p>
       </form>
     </section>
 
@@ -142,6 +157,25 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       await onSaved();
     });
   };
+  $("#history-form").onsubmit = (event) => {
+    event.preventDefault();
+    run(async () => {
+      const result = await api("settings/history", {
+        enabled: $("#history-form [name=enabled]").checked,
+        intervalMinutes: Number(new FormData(event.target).get("intervalMinutes")),
+      });
+      toast(t("Réglages de synchronisation enregistrés."));
+      $("#history-result").textContent = t("Intervalle : {n} min", { n: result.intervalMinutes });
+    });
+  };
+  $("#history-sync").onclick = () => run(async () => {
+    $("#history-result").textContent = t("Synchronisation en cours…");
+    const status = await api("history/sync", {});
+    $("#history-last").textContent = lastSyncLabel(status.lastFullSync);
+    $("#history-result").textContent = t("Synchronisation terminée.");
+    toast(t("Synchronisation terminée."));
+  });
+
   container.querySelectorAll("[data-admin-account]").forEach((box) => {
     box.onchange = () => run(async () => {
       try {
