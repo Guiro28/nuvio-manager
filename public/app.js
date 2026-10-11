@@ -1724,3 +1724,23 @@ run(async () => {
   else if (initial.publicUrlRequired) setup(true);
   else await render();
 });
+
+// Sidebar footer version badge. Public endpoint; CI injects the real values, so
+// local runs fall back to the "dev" label already in the markup.
+(async () => {
+  try {
+    const v = await (await fetch("/api/version")).json();
+    const el = $("#app-version");
+    if (!el || !v) return;
+    const label = [v.version && "v" + v.version, v.build && "build " + v.build]
+      .filter(Boolean)
+      .join(" · ");
+    if (label) el.textContent = label;
+    if (v.sha) {
+      el.href = `${v.repoUrl}/commit/${v.sha}`;
+      el.title = `commit ${v.sha}${v.date ? " · " + v.date.slice(0, 10) : ""}`;
+    } else if (v.repoUrl) {
+      el.href = v.repoUrl;
+    }
+  } catch {}
+})();

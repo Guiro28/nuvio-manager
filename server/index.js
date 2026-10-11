@@ -35,6 +35,23 @@ const host = process.env.HOST || "127.0.0.1",
   port = Number(process.env.PORT || 3100);
 
 const db = vault(process.env.DATA_DIR || path.join(root, "data"));
+
+// Build/version info shown in the sidebar. CI injects GIT_SHA / BUILD_NUMBER /
+// BUILD_DATE at image build time; empty locally (the UI then shows "dev").
+const APP_REPO_URL = "https://github.com/Guiro28/nuvio-manager";
+const APP_VERSION = {
+  version: (() => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version || "";
+    } catch {
+      return "";
+    }
+  })(),
+  build: process.env.BUILD_NUMBER || "",
+  sha: process.env.GIT_SHA || "",
+  date: process.env.BUILD_DATE || "",
+  repoUrl: APP_REPO_URL,
+};
 const state = db.read("state", { accounts: [], library: [], backups: [] });
 const save = () => db.write("state", state);
 const panel = db.read("panel-settings", {});
@@ -564,6 +581,7 @@ const server = http.createServer(async (req, res) => {
       ]);
       if (port !== 0 && url.pathname !== "/api/setup")
         assert(allowedHosts.has(req.headers.host), "Hôte non autorisé", 403);
+      if (url.pathname === "/api/version") return json(res, APP_VERSION);
       if (url.pathname === "/api/setup") {
         if (req.method === "GET") return json(res, { required: setupRequired(), publicUrlRequired: !panel.publicUrl });
         assert(req.method === "POST", "Méthode non autorisée", 405);

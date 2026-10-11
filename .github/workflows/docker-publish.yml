@@ -43,6 +43,15 @@ jobs:
     steps:
       - name: Récupérer le dépôt
         uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Calculer la version
+        id: version
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Activer QEMU
         uses: docker/setup-qemu-action@v4.4.0
@@ -83,5 +92,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ steps.version.outputs.sha }}
+            BUILD_NUMBER=${{ steps.version.outputs.build }}
+            BUILD_DATE=${{ steps.version.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
