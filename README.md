@@ -1,21 +1,58 @@
 # Nuvio Manager
 
-Dashboard auto-hébergé pour gérer plusieurs comptes et profils [Nuvio](https://nuvio.tv).
+Dashboard auto-hébergé pour gérer plusieurs comptes et profils [Nuvio](https://nuvio.tv), ainsi que les comptes [Tuvora](https://tuvora.co).
 
-> Projet communautaire indépendant, non affilié à Nuvio.
+> Projet communautaire indépendant, non affilié à Nuvio ni à Tuvora.
 
 ## Fonctionnalités
 
-- Gestion de plusieurs comptes et profils Nuvio.
-- Réglages ATV et Mobile en français.
-- Copie complète ou partielle des paramètres entre profils.
-- Bibliothèque d’addons avec attribution par profil.
-- Proxy direct ou proxy externe HTTP/SOCKS par addon.
-- Historique, progression, bibliothèque et statistiques.
-- Connexion facultative à Trakt et Simkl.
-- Enrichissement des contenus avec TMDB.
-- Sauvegardes chiffrées.
+### Comptes & profils
+
+- Plusieurs comptes **Nuvio** et **Tuvora**, chacun avec plusieurs profils.
+- Connexion Nuvio par appairage TV (code), Tuvora par e-mail + mot de passe. **Le mot de passe n’est jamais stocké.**
+- Identité de profil : nom, couleur, avatar (galerie Nuvio ou Xperience), héritage des addons/plugins du profil principal.
+- Interface multilingue : français, anglais, espagnol, allemand, italien.
+
+### Réglages & contenu
+
+- Réglages **Apple TV** et **Mobile** par profil.
+- **Catalogues d’accueil** : ordre d’affichage, activation, titres personnalisés.
+- **Collections** : création et édition complète (dossiers, sources Addon / TMDB / Trakt), à l’image du dashboard officiel.
+- **Bibliothèque d’addons** avec attribution par profil.
+
+### Proxy d’addons intégré
+
+- Relais **direct** (interne) ou via **proxy externe** HTTP, HTTPS, SOCKS4 ou SOCKS5 (compatible Cloudflare WARP).
+- **URL de relais uniques par profil et révocables** : supprimer un compte ou retirer un addon coupe immédiatement le lien ; le clonage régénère des URL propres au profil cible.
+- Compteurs de bande passante (interne / externe).
+
+### Clonage de profils
+
+- Copie **complète ou partielle** entre profils (réglages TV/Mobile, addons, plugins, catalogues, collections), y compris entre comptes et entre Nuvio et Tuvora.
+- Garde-fous : sens de la copie affiché, avertissement en cas de perte de données, protection contre l’écrasement par une source vide.
+
+### Suivi & statistiques
+
+- Connexion facultative à **Trakt** et **Simkl** ; exclusion possible de l’historique Nuvio par profil.
+- Historique, progression et bibliothèque par profil.
+- **Statistiques** avec activité quotidienne cliquable (détail par jour : profils et contenus vus, fiches films/séries) et enrichissement **TMDB** (titres localisés, synopsis, affiches).
+
+### Spécifique Tuvora
+
+- **Playlists IPTV** par profil (Xtream, M3U, Stalker).
+- **Guide des sports** : ligues et équipes suivies.
+
+### Sauvegardes & données
+
+- **Sauvegardes chiffrées** du compte avec restauration (et repli automatique si l’API refuse la restauration).
+- Toutes les données locales (comptes, sessions, réglages, sauvegardes) sont **chiffrées au repos**.
+
+### Interface & exploitation
+
+- Tableau de bord d’accueil : mémoire, processeur, disponibilité, bande passante et état réseau/proxy.
 - Thème sombre et clair.
+- Version du manager affichée dans la barre latérale (clic vers le commit) et liens Discord et GitHub.
+- Images Docker multi-architecture (AMD64 / ARM64).
 
 ## Installation avec Docker
 
