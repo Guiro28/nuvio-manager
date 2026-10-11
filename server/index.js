@@ -186,6 +186,44 @@ const requestLang = (req) => {
 const trackerConfig = (service) => panel.trackerApps?.[service] || {};
 const savePanel = () => db.write("panel-settings", panel);
 
+// After each history sync, warm the TMDB cache for every title in the store so
+// stats (any period / profile selection) never wait on TMDB. Default locale
+// (fr-FR); other UI languages warm on first view as before. Non-blocking, capped
+// concurrency inside enrichActivity (5).
+async function prewarmTmdb() {
+  if (!panel.tmdbKey) return;
+  const items = [
+    ...new Map(
+      historyStore
+        .getDataset(state.accounts)
+        .flatMap((profile) => profile.events)
+        .map((event) => {
+          const contentType = event.kind === "movie" ? "movie" : "series";
+          return [
+            `${contentType}:${event.contentId}`,
+            { content_id: event.contentId, content_type: contentType },
+          ];
+        }),
+    ).values(),
+  ];
+  if (!items.length) return;
+  // Chunk so the cache is persisted incrementally: a transient TMDB error loses
+  // at most one chunk's progress, not the whole run (enrichActivity persists once
+  // per call). Cached titles are cheap (no network), so this is near-free when warm.
+  const CHUNK = 300;
+  for (let start = 0; start < items.length; start += CHUNK) {
+    await enrichActivity(
+      { items: items.slice(start, start + CHUNK) },
+      {
+        key: panel.tmdbKey,
+        cache: tmdbCache,
+        persist: (value) => db.write("tmdb-cache", value),
+        language: TMDB_LOCALES.fr,
+      },
+    );
+  }
+}
+
 // Background mirror of every profile's history; stats and the history tab read
 // from it so they render instantly regardless of how many profiles exist.
 const historyStore = createHistoryStore({
@@ -199,6 +237,7 @@ const historyStore = createHistoryStore({
   externalHistory,
   getIntervalMinutes: () => Number(panel.historySyncMinutes) || 30,
   isEnabled: () => panel.historySyncEnabled !== false,
+  onSync: prewarmTmdb,
 });
 // Background sampling of process CPU% and RSS, kept as a 1-week history in the
 // data volume for the home-page chart. A single sampler owns the cpuUsage delta

@@ -77,6 +77,7 @@ export function createHistoryStore({
   externalHistory,
   getIntervalMinutes,
   isEnabled,
+  onSync, // optional: called (non-blocking) after each successful full sync
   concurrency = 6,
   log = console,
 }) {
@@ -196,6 +197,10 @@ export function createHistoryStore({
 
     store.lastFullSync = Date.now();
     save(store);
+
+    // Warm derived caches (e.g. TMDB metadata) in the background so stats render
+    // instantly. Non-blocking: never let it hold up or fail the sync.
+    if (onSync) Promise.resolve(onSync(store)).catch((error) => log.error?.("[history] onSync :", error.message));
   }
 
   // One sync at a time; callers awaiting during a run share the in-flight one.
