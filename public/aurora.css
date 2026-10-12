@@ -688,12 +688,23 @@ header {
 }
 
 .stats-lead-image {
-  inset: 10px auto 10px 10px;
+  inset: auto;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
   width: 116px;
-  height: calc(100% - 20px);
+  height: auto;
+  object-fit: contain;
   border: 1px solid rgba(174, 199, 234, 0.2);
   border-radius: 8px;
   box-shadow: 8px 0 24px rgba(0, 4, 13, 0.32);
+}
+
+/* Poster <img> keeps its natural ratio so the border hugs it exactly (only the
+   radius nibbles the corners). The fallback <span> has no intrinsic size, so it
+   gets the standard poster ratio. */
+span.stats-lead-image {
+  aspect-ratio: 2 / 3;
 }
 
 .stats-lead-image.round,

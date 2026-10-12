@@ -1649,11 +1649,15 @@ function login() {
   if (document.querySelector(".auth-screen")) return;
   const host = document.createElement("div");
   host.className = "auth-screen";
+  const authLogos =
+    `<img class="auth-logo" src="/assets/nuvio_logo.png" alt="Nuvio">` +
+    `<span class="auth-logo auth-logo-svg" aria-label="Tuvora">${TUVORA_LOGO}</span>`;
   host.innerHTML =
     `<div class="auth-card"><div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="64" height="64"><div><h2>Nuvio Manager</h2><p class="muted">${esc(t("Connectez-vous à votre dashboard."))}</p></div></div>` +
+    `<p class="auth-hint"><span class="auth-hint-logos">${authLogos}</span><span>${esc(t("Connectez-vous avec votre compte Nuvio ou Tuvora."))}</span></p>` +
     `<form id="nuvio-login" class="form"><label>${esc(t("Email"))}<input name="email" type="email" autocomplete="username" placeholder="${esc(t("vous@exemple.com"))}" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="current-password" required></label><button class="primary">${esc(t("Se connecter"))}</button><p id="nuvio-error" class="error" hidden></p></form>` +
     `<div class="auth-sep"><span>${esc(t("ou"))}</span></div>` +
-    `<details class="auth-admin"><summary>${esc(t("Connexion local"))}</summary><form id="admin-login" class="form"><label>${esc(t("Utilisateur"))}<input name="user" autocomplete="username" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="current-password" required></label><button>${esc(t("Se connecter"))}</button><p id="admin-error" class="error" hidden></p></form></details></div>`;
+    `<details class="auth-admin"><summary>${esc(t("Connexion local"))}</summary><p class="muted auth-admin-note">${esc(t("Compte administrateur du dashboard."))}</p><form id="admin-login" class="form"><label>${esc(t("Utilisateur"))}<input name="user" autocomplete="username" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="current-password" required></label><button>${esc(t("Se connecter"))}</button><p id="admin-error" class="error" hidden></p></form></details></div>`;
   document.body.appendChild(host);
   const done = async () => { host.remove(); await render(); };
   const bind = (formId, route, errId) => {

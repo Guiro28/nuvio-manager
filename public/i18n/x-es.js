@@ -1352,4 +1352,6 @@ export default {
   "Intervalle : {n} min": "Intervalo: {n} min",
   "Synchronisation en cours…": "Sincronizando…",
   "Synchronisation terminée.": "Sincronización completada.",
+  "Connectez-vous avec votre compte Nuvio ou Tuvora.": "Inicia sesión con tu cuenta Nuvio o Tuvora.",
+  "Compte administrateur du dashboard.": "Cuenta de administrador del panel.",
 };
