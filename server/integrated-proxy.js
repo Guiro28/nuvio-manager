@@ -52,7 +52,7 @@ const upstreamFor = (mode, proxyUrl) => {
   };
 };
 
-function normalizeManifestUrl(value) {
+export function normalizeManifestUrl(value) {
   let source = String(value || "").trim().replace(/^stremio:\/\//i, "https://");
   if (!/\/manifest\.json(?:$|\?)/i.test(source))
     source = source.replace(/\/+$/, "") + "/manifest.json";

@@ -630,6 +630,126 @@ header {
   flex: 0 0 auto;
   justify-content: flex-end;
 }
+
+/* Addon library: dépliant par addon, profils + mode de proxy par profil. */
+.library-addon details { min-width: 0; }
+.library-addon summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  cursor: pointer;
+  list-style: none;
+}
+.library-addon summary::-webkit-details-marker { display: none; }
+.lib-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.lib-chevron { color: var(--text-muted); transition: transform 0.15s ease; }
+.library-addon details[open] .lib-chevron { transform: rotate(180deg); }
+.lib-avatar-stack { display: flex; align-items: center; }
+.lib-avatar-stack .avatar {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  margin-left: -8px;
+  border: 2px solid var(--surface);
+  flex: 0 0 auto;
+}
+.lib-avatar-stack .avatar:first-child { margin-left: 0; }
+.lib-avatar-stack .avatar-fallback { font-size: 0.78rem; }
+.lib-avatar-more {
+  margin-left: 6px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.lib-count { white-space: nowrap; }
+.lib-profiles { margin-top: 14px; border-top: 1px solid var(--border); }
+.lib-empty { margin: 14px 0 2px; }
+.lib-loading { padding: 8px 2px; }
+.lib-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.lib-profile:last-child { border-bottom: 0; }
+.lib-profile .avatar {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.lib-profile .avatar-fallback { font-size: 0.95rem; }
+.lib-profile-meta { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.lib-profile-name { font-weight: 600; }
+.lib-profile-meta .muted { font-size: 0.78rem; }
+.lib-mode {
+  flex: 0 0 auto;
+  width: 240px;
+  max-width: 42vw;
+  border-left: 3px solid var(--text-muted);
+}
+.lib-mode-direct { border-left-color: #3b82f6; }
+.lib-mode-warp { border-left-color: #10b981; }
+.icon-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
+.lib-actions { margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Attribution multiple : liste à cocher des addons. */
+.lib-pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+.lib-picklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.lib-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+}
+.lib-pick:hover { background: var(--selected); }
+.lib-pick-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.addon-logo-sm {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+@media (max-width: 720px) {
+  .lib-profile { flex-wrap: wrap; }
+  .lib-mode { width: 100%; max-width: none; order: 3; }
+  .lib-profile-meta { flex: 1 1 60%; }
+}
 .pill-row {
   display: flex;
   gap: 8px;

@@ -1208,7 +1208,7 @@ async function preview(data) {
     }
   };
 }
-function renderLibrary() {
+async function renderLibrary() {
   const addonLogo = (addon) => {
     let source = "";
     try {
@@ -1217,20 +1217,85 @@ function renderLibrary() {
     } catch {}
     return `<span class="addon-logo"><span>${esc((addon.name || "A").slice(0, 1).toUpperCase())}</span>${source ? `<img src="${esc(source)}" alt="${esc(t("Logo de {name}", { name: addon.name }))}" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
   };
+  // Proxy-mode <select> for one (addon, profile): change applies through the same
+  // preview/apply pipeline (backup + diff confirmation) as a manual assignment.
+  const MODE_LABELS = () => ({
+    none: t("Sans proxy · URL d’origine"),
+    direct: t("Proxy · IP du serveur"),
+    warp: t("Proxy externe · WARP, SOCKS ou HTTP"),
+  });
+  const modeSelect = (addonId, u) => {
+    const labels = MODE_LABELS();
+    const opts = ["none", "direct", "warp"]
+      .map((m) => `<option value="${m}" ${u.mode === m ? "selected" : ""}>${esc(labels[m])}</option>`)
+      .join("");
+    return `<select class="lib-mode lib-mode-${esc(u.mode)}" data-mode-addon="${esc(addonId)}" data-mode-account="${esc(u.accountId)}" data-mode-profile="${u.profileId}">${opts}</select>`;
+  };
+  const profileRow = (addonId, u) =>
+    `<div class="lib-profile">${profileAvatar(u.identity)}<div class="lib-profile-meta"><span class="lib-profile-name">${esc(u.identity.name || u.profileName)}</span><span class="muted">${esc(u.accountName)}${u.provider === "tuvora" ? " · Tuvora" : ""}${u.enabled === false ? " · " + esc(t("désactivé")) : ""}</span></div>${modeSelect(addonId, u)}<button class="icon-btn" data-remove-addon="${esc(addonId)}" data-remove-account="${esc(u.accountId)}" data-remove-profile="${u.profileId}" aria-label="${esc(t("Retirer de ce profil"))}" title="${esc(t("Retirer de ce profil"))}">✕</button></div>`;
+  const stack = (users) =>
+    `<span class="lib-avatar-stack">${users.slice(0, 5).map((u) => profileAvatar(u.identity)).join("")}${users.length > 5 ? `<span class="lib-avatar-more">+${users.length - 5}</span>` : ""}</span>`;
+  const card = (a, users) =>
+    `<article class="addon library-addon"><details open><summary class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><span class="lib-head-right">${users.length ? stack(users) : ""}<span class="badge neutral lib-count">${users.length ? esc(t("{n} profils", { n: users.length })) : esc(t("Aucun profil"))}</span><i class="lib-chevron" aria-hidden="true">⌄</i></span></summary><div class="lib-profiles">${users.length ? users.map((u) => profileRow(a.id, u)).join("") : `<p class="muted lib-empty">${esc(t("Aucun profil n’utilise cet addon pour le moment."))}</p>`}</div></details><div class="actions lib-actions"><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-delete="${a.id}" class="quiet">${esc(t("Retirer du catalogue"))}</button></div></article>`;
+
   $("#content").innerHTML =
     heading(
       t("nav.library"),
-      t("Ajoutez une source une fois, puis attribuez-la aux profils de votre choix."),
-      btn(t("＋ Ajouter un addon"), "new-addon", "primary"),
+      t("Chaque addon montre les profils qui l’utilisent. Changez le mode de proxy profil par profil."),
+      btn(t("＋ Ajouter un addon"), "new-addon", "primary") +
+        (state.library.length ? btn(t("Attribuer plusieurs addons"), "bulk-assign") : ""),
     ) +
-    `<div class="list">${state.library.map((a) => `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></article>`).join("") || `<div class="empty"><div class="empty-symbol">⊞</div><h2>${esc(t("Votre catalogue commence ici."))}</h2><p class="muted">${esc(t("Ajoutez l’URL du manifest d’un addon. Son attribution aux profils reste manuelle."))}</p></div>`}</div>`;
-  $$(".addon-logo img").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
+    (state.library.length
+      ? `<div class="list" id="library-list"><p class="muted lib-loading">${esc(t("Chargement…"))}</p></div>`
+      : `<div class="empty"><div class="empty-symbol">⊞</div><h2>${esc(t("Votre catalogue commence ici."))}</h2><p class="muted">${esc(t("Ajoutez l’URL du manifest d’un addon. Son attribution aux profils reste manuelle."))}</p></div>`);
+  $("#new-addon").onclick = () => addonForm();
+  if ($("#bulk-assign")) $("#bulk-assign").onclick = () => run(() => bulkAssign());
+
   if (state.library.some((item) => !Object.hasOwn(item, "logo")))
     api("library/refresh-logos", {}).then((result) => {
       state.library = result.library;
       if (page === "library") renderLibrary();
     }).catch(() => {});
-  $("#new-addon").onclick = () => addonForm();
+
+  if (!state.library.length) return;
+
+  let usage = {};
+  try {
+    usage = (await api("library/usage")).usage || {};
+  } catch {}
+  const list = $("#library-list");
+  if (!list) return;
+  list.innerHTML = state.library.map((a) => card(a, usage[a.id] || [])).join("");
+  $$("#library-list .addon-logo img, #library-list .profile-avatar").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
+
+  // After a mode change / removal, re-render once the confirmation dialog closes
+  // so every <select> reflects the stored truth (whether the change was applied
+  // or cancelled); if no dialog opened (nothing to change), re-render immediately.
+  const resync = () => {
+    const dlg = $("#dialog");
+    if (dlg.open) dlg.addEventListener("close", () => { if (page === "library") renderLibrary(); }, { once: true });
+    else if (page === "library") renderLibrary();
+  };
+  $$("[data-mode-addon]").forEach((sel) => {
+    sel.onchange = () => run(async () => {
+      await preview({
+        accountId: sel.dataset.modeAccount,
+        profileId: Number(sel.dataset.modeProfile),
+        assignment: { id: sel.dataset.modeAddon, mode: sel.value },
+      });
+      resync();
+    });
+  });
+  $$("[data-remove-addon]").forEach((b) => {
+    b.onclick = () => run(async () => {
+      await preview({
+        accountId: b.dataset.removeAccount,
+        profileId: Number(b.dataset.removeProfile),
+        assignment: { id: b.dataset.removeAddon, mode: "remove" },
+      });
+      resync();
+    });
+  });
   $$("[data-edit]").forEach(
     (b) =>
       (b.onclick = () =>
@@ -1287,6 +1352,44 @@ async function assign(id) {
         assignment: { id, mode: $("#assign-mode").value },
       }),
     );
+}
+// Add several library addons to one profile in a single pass (same proxy mode).
+// Addons already installed on the profile have their mode updated in place.
+async function bulkAssign() {
+  if (!accountId) return toast(t("Connecte d’abord un compte Nuvio."));
+  await loadProfiles();
+  const modeOptions = `<option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · WARP, SOCKS ou HTTP"))}</option>`;
+  const checklist = state.library
+    .map(
+      (a) =>
+        `<label class="check-label lib-pick"><input type="checkbox" value="${esc(a.id)}"><span class="addon-logo addon-logo-sm"><span>${esc((a.name || "A").slice(0, 1).toUpperCase())}</span></span><span class="lib-pick-name">${esc(a.name)}</span></label>`,
+    )
+    .join("");
+  openDialog(
+    `<h2>${esc(t("Attribuer plusieurs addons"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="bulk-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="bulk-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="bulk-mode">${modeOptions}</select></label><div class="lib-pick-head"><span class="muted">${esc(t("Addons à ajouter"))}</span><button type="button" id="bulk-all" class="quiet">${esc(t("Tout sélectionner"))}</button></div><div class="lib-picklist">${checklist}</div><p class="muted">${esc(t("Les addons déjà présents sur ce profil verront leur mode mis à jour."))}</p><p class="muted">${esc(t("L’adresse du proxy externe se configure dans Paramètres. Les URL publiques du dashboard doivent rester accessibles depuis vos appareils."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="bulk-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
+  );
+  $("#bulk-account").onchange = (e) =>
+    run(async () => {
+      $("#bulk-profile").innerHTML = profileOptions(
+        await api("profiles?accountId=" + encodeURIComponent(e.target.value)),
+      );
+    });
+  const boxes = () => $$("#dialog .lib-picklist input[type=checkbox]");
+  $("#bulk-all").onclick = () => {
+    const all = boxes().every((b) => b.checked);
+    boxes().forEach((b) => (b.checked = !all));
+    $("#bulk-all").textContent = all ? t("Tout sélectionner") : t("Tout désélectionner");
+  };
+  $("#bulk-preview").onclick = () =>
+    run(() => {
+      const ids = boxes().filter((b) => b.checked).map((b) => b.value);
+      if (!ids.length) return toast(t("Sélectionne au moins un addon."));
+      return preview({
+        accountId: $("#bulk-account").value,
+        profileId: Number($("#bulk-profile").value),
+        assignment: { ids, mode: $("#bulk-mode").value },
+      });
+    });
 }
 async function renderCopy() {
   if (!accountId) {

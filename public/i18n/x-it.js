@@ -1375,4 +1375,12 @@ export default {
   "Géré par l’environnement (AUTH_PROXY).": "Gestito dall’ambiente (AUTH_PROXY).",
   "Authentification externe activée.": "Autenticazione esterna attivata.",
   "Authentification externe désactivée.": "Autenticazione esterna disattivata.",
+  "Chaque addon montre les profils qui l’utilisent. Changez le mode de proxy profil par profil.": "Ogni addon mostra i profili che lo usano. Cambia la modalità di proxy profilo per profilo.",
+  "Attribuer plusieurs addons": "Assegna più addon",
+  "Aucun profil n’utilise cet addon pour le moment.": "Nessun profilo usa ancora questo addon.",
+  "Retirer de ce profil": "Rimuovi da questo profilo",
+  "Retirer du catalogue": "Rimuovi dal catalogo",
+  "Addons à ajouter": "Addon da aggiungere",
+  "Les addons déjà présents sur ce profil verront leur mode mis à jour.": "Gli addon già presenti su questo profilo avranno la modalità aggiornata.",
+  "Sélectionne au moins un addon.": "Seleziona almeno un addon.",
 };

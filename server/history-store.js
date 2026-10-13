@@ -111,9 +111,66 @@ export function createHistoryStore({
     return out;
   }
 
-  async function fetchProfile(account, identity) {
+  // The per-profile addon list: cheap (one REST row set), fetched on every sync
+  // regardless of the history toggle so the addon library knows which profiles
+  // use each addon. A profile inheriting the primary profile's addons resolves
+  // to profile 1's list (same rule the Nuvio/Tuvora backends apply).
+  async function fetchAddons(token, identity, providerId) {
+    const pid = identity.uses_primary_addons ? 1 : identity.profile_index;
+    const query = new URLSearchParams({
+      user_id: "eq." + identity.user_id,
+      profile_id: "eq." + pid,
+      select: "url,name,enabled,sort_order",
+      order: "sort_order.asc",
+    });
+    const rows = await call("/rest/v1/addons?" + query, null, token, "GET", providerId);
+    return Array.isArray(rows)
+      ? rows.map((r) => ({ url: String(r.url || ""), name: String(r.name || ""), enabled: r.enabled !== false }))
+      : [];
+  }
+
+  // A compact identity snapshot kept with each profile so the addon library can
+  // render avatars without a second round-trip to the backend.
+  const identitySnapshot = (identity) => ({
+    name: identity.name || "",
+    profile_index: identity.profile_index,
+    avatar_color_hex: identity.avatar_color_hex || null,
+    avatar_image_url: identity.avatar_image_url || null,
+    avatar_url: identity.avatar_url || null,
+  });
+
+  // heavy = also refresh the watching history (watched/progress/library/external).
+  // Light-only runs (history disabled) keep any previous heavy data untouched and
+  // refresh just the addon list + identity.
+  async function fetchProfile(account, identity, { heavy, prev } = {}) {
     const token = await getToken(account);
     const providerId = account.provider;
+    const ref = `${account.id}:${identity.profile_index}`;
+    const base = {
+      ref,
+      accountId: account.id,
+      providerId,
+      accountName: account.name || account.email,
+      profileName: identity.name || `Profil ${identity.profile_index}`,
+      avatarUrl: identity.avatar_image_url || identity.avatar_url || null,
+      userId: identity.user_id,
+      identity: identitySnapshot(identity),
+      lastError: "",
+    };
+    const addons = await fetchAddons(token, identity, providerId);
+    base.addons = addons;
+    base.addonsSync = Date.now();
+    if (!heavy) {
+      // Preserve the last-good history; only the addon map was refreshed.
+      return {
+        ...base,
+        watched: prev?.watched || [],
+        progress: prev?.progress || [],
+        library: prev?.library || [],
+        external: prev?.external || [],
+        lastSync: prev?.lastSync || 0,
+      };
+    }
     const [watched, progress, library, external] = await Promise.all([
       fetchKind("watched", token, identity, providerId),
       fetchKind("progress", token, identity, providerId),
@@ -121,23 +178,16 @@ export function createHistoryStore({
       externalHistory ? externalHistory(account.id, identity.profile_index) : [],
     ]);
     return {
-      ref: `${account.id}:${identity.profile_index}`,
-      accountId: account.id,
-      providerId,
-      accountName: account.name || account.email,
-      profileName: identity.name || `Profil ${identity.profile_index}`,
-      avatarUrl: identity.avatar_image_url || identity.avatar_url || null,
-      userId: identity.user_id,
+      ...base,
       watched,
       progress,
       library,
       external: Array.isArray(external) ? external : [],
       lastSync: Date.now(),
-      lastError: "",
     };
   }
 
-  async function run() {
+  async function run({ heavy } = {}) {
     const accounts = getAccounts();
     const tasks = [];
     const enumerated = new Set(); // accounts whose profile list we could read
@@ -158,11 +208,11 @@ export function createHistoryStore({
 
     await pool(tasks, concurrency, async ({ account, identity }) => {
       const ref = `${account.id}:${identity.profile_index}`;
+      const prev = store.profiles[ref];
       try {
-        store.profiles[ref] = await fetchProfile(account, identity);
+        store.profiles[ref] = await fetchProfile(account, identity, { heavy, prev });
       } catch (error) {
         // Keep the last good data; only record the error.
-        const prev = store.profiles[ref];
         if (prev) {
           prev.lastError = error.message;
         } else {
@@ -173,6 +223,9 @@ export function createHistoryStore({
             accountName: account.name || account.email,
             profileName: identity.name || `Profil ${identity.profile_index}`,
             avatarUrl: identity.avatar_image_url || identity.avatar_url || null,
+            identity: identitySnapshot(identity),
+            addons: [],
+            addonsSync: 0,
             watched: [],
             progress: [],
             library: [],
@@ -195,19 +248,23 @@ export function createHistoryStore({
       else if (enumerated.has(accId) && !existing.has(ref)) delete store.profiles[ref];
     }
 
-    store.lastFullSync = Date.now();
+    if (heavy) store.lastFullSync = Date.now();
     save(store);
 
     // Warm derived caches (e.g. TMDB metadata) in the background so stats render
-    // instantly. Non-blocking: never let it hold up or fail the sync.
-    if (onSync) Promise.resolve(onSync(store)).catch((error) => log.error?.("[history] onSync :", error.message));
+    // instantly. Non-blocking: never let it hold up or fail the sync. Only after a
+    // heavy run, since light runs leave the history untouched.
+    if (heavy && onSync) Promise.resolve(onSync(store)).catch((error) => log.error?.("[history] onSync :", error.message));
   }
 
   // One sync at a time; callers awaiting during a run share the in-flight one.
+  // The addon map is always refreshed; the watching history only when the feature
+  // is enabled (or explicitly forced), so disabling history still keeps the addon
+  // library current without paying for the heavy history fetch.
   function syncAll({ force = false } = {}) {
     if (running) return running;
-    if (!force && !isEnabled()) return Promise.resolve();
-    running = run()
+    const heavy = force || isEnabled();
+    running = run({ heavy })
       .catch((error) => log.error?.("[history] sync :", error.message))
       .finally(() => {
         running = null;
@@ -215,7 +272,7 @@ export function createHistoryStore({
     return running;
   }
 
-  async function syncProfile(ref) {
+  async function syncProfile(ref, { heavy = true } = {}) {
     const [accountId, profileIndex] = ref.split(":");
     const account = getAccounts().find((a) => a.id === accountId);
     if (!account) return;
@@ -228,13 +285,40 @@ export function createHistoryStore({
       return;
     }
     try {
-      store.profiles[ref] = await fetchProfile(account, identity);
+      store.profiles[ref] = await fetchProfile(account, identity, { heavy, prev: store.profiles[ref] });
     } catch (error) {
       const prev = store.profiles[ref];
       if (prev) prev.lastError = error.message;
       throw error;
     }
     save(store);
+  }
+
+  // Light refresh of one profile's addon map (no history fetch). Used right after
+  // the manager rewrites a profile's addons so the library reflects it at once.
+  function refreshAddons(ref) {
+    return syncProfile(ref, { heavy: false }).catch((error) => {
+      log.error?.(`[history] addons ${ref} :`, error.message);
+    });
+  }
+
+  // Per-profile installed addons for the library's "who uses this addon" view.
+  // Returns only profiles whose addon map has been fetched at least once.
+  function getAddonUsage(accounts) {
+    const ids = new Set(accounts.map((a) => a.id));
+    return Object.values(store.profiles)
+      .filter((p) => ids.has(p.accountId) && p.addonsSync)
+      .map((p) => ({
+        ref: p.ref,
+        accountId: p.accountId,
+        providerId: p.providerId,
+        accountName: p.accountName,
+        profileIndex: p.identity?.profile_index ?? Number(p.ref.split(":")[1]),
+        profileName: p.profileName,
+        identity: p.identity || { name: p.profileName, avatar_url: p.avatarUrl },
+        addons: p.addons || [],
+        addonsSync: p.addonsSync || 0,
+      }));
   }
 
   // Dataset for the stats route (unfiltered; the route applies display filters).
@@ -307,15 +391,15 @@ export function createHistoryStore({
   function schedule() {
     if (timer) clearInterval(timer);
     const minutes = Math.max(1, Number(getIntervalMinutes()) || 30);
-    timer = setInterval(() => {
-      if (isEnabled()) syncAll();
-    }, minutes * 60 * 1000);
+    // Always tick: syncAll refreshes the addon map every cycle and only pays for
+    // the heavy history fetch when the feature is enabled.
+    timer = setInterval(() => syncAll(), minutes * 60 * 1000);
     if (timer.unref) timer.unref();
   }
 
   function start() {
     schedule();
-    if (isEnabled()) syncAll(); // initial fill (non-blocking)
+    syncAll(); // initial fill (non-blocking); addon map even if history is off
   }
 
   function stop() {
@@ -329,9 +413,11 @@ export function createHistoryStore({
     reschedule: schedule,
     syncAll,
     syncProfile,
+    refreshAddons,
     getDataset,
     hasData,
     getActivity,
+    getAddonUsage,
     pruneAccount,
     status,
   };

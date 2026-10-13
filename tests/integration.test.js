@@ -42,6 +42,7 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
     },
   };
   const versions = { 1: "2026-01-01T00:00:00Z", 2: "2026-01-02T00:00:00Z" };
+  const addonRows = { 1: [], 2: [] }; // installed addons per profile_index (stateful)
   let writes = 0,
     failPlugins = false,
     profilePatch,
@@ -99,8 +100,17 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
           updated_at: versions[b.p_profile_id],
         },
       ]);
-    if (route === "/rest/v1/addons" || route === "/rest/v1/plugins")
-      return reply([]);
+    if (route === "/rest/v1/addons") {
+      const pid = Number(
+        (new URL(req.url, "http://local").searchParams.get("profile_id") || "").replace("eq.", ""),
+      );
+      return reply(addonRows[pid] || []);
+    }
+    if (route === "/rest/v1/plugins") return reply([]);
+    if (route.endsWith("sync_push_addons")) {
+      addonRows[b.p_profile_id] = b.p_addons;
+      return reply(null);
+    }
     if (route.endsWith("sync_export_account_backup"))
       return reply({ format: "nuvio_account_backup", version: 1, data: { settings } });
     if (route.endsWith("sync_restore_account_backup")) {
@@ -225,6 +235,31 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
     url: "https://example.invalid/addon",
   });
   assert.equal(lib.data.url, "https://example.invalid/addon/manifest.json");
+  // Addon library: multi-assign, mode replace (no duplicate) and per-profile removal.
+  const lib2 = await call("library/save", { name: "Second addon", url: "https://example.invalid/second" });
+  const bulk = await call("preview", {
+    accountId: "test-user",
+    profileId: 1,
+    assignment: { ids: [lib.data.id, lib2.data.id], mode: "none" },
+  });
+  assert.equal((await call("apply", { id: bulk.data.id })).status, 200);
+  assert.equal(addonRows[1].length, 2); // both addons added in one pass
+  const reassign = await call("preview", {
+    accountId: "test-user",
+    profileId: 1,
+    assignment: { id: lib.data.id, mode: "none" },
+  });
+  assert.equal((await call("apply", { id: reassign.data.id })).status, 200);
+  assert.equal(addonRows[1].length, 2); // re-assigning the same addon does not duplicate it
+  const detach = await call("preview", {
+    accountId: "test-user",
+    profileId: 1,
+    assignment: { id: lib.data.id, mode: "remove" },
+  });
+  assert.equal((await call("apply", { id: detach.data.id })).status, 200);
+  assert.equal(addonRows[1].length, 1);
+  assert.equal(addonRows[1][0].name, "Second addon");
+  addonRows[1] = []; // reset so later assertions see a clean profile
   const plan = await call("preview", {
     accountId: "test-user",
     profileId: 2,

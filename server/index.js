@@ -5,7 +5,7 @@ import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
 import { createHistoryStore } from "./history-store.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestLogo } from "./manifest.js";
-import { createIntegratedProxy, normalizeProxyUrl, proxySummary } from "./integrated-proxy.js";
+import { createIntegratedProxy, normalizeProxyUrl, proxySummary, normalizeManifestUrl } from "./integrated-proxy.js";
 import { createProxyDiagnostics } from "./proxy-diagnostics.js";
 import {
   startTrakt,
@@ -778,6 +778,17 @@ const addonUpstreamKey = (url) => {
   const ref = addonProxy.describe(url);
   return ref ? `${ref.mode}|${ref.manifestUrl}` : url;
 };
+// Mode-agnostic key: resolve any installed addon URL (relay or plain) to its
+// canonical upstream manifest, so one addon is matched across proxy modes — this
+// is what lets a re-assignment replace the existing entry instead of duplicating
+// it, and what links a profile's addons back to a library entry.
+const addonManifestKey = (url) => {
+  const ref = addonProxy.describe(url);
+  if (ref) {
+    try { return normalizeManifestUrl(ref.manifestUrl); } catch { return ref.manifestUrl; }
+  }
+  try { return normalizeManifestUrl(url); } catch { return String(url || ""); }
+};
 const writableList = (rows) =>
   rows.map((r, i) => ({
     url: normalizeUrl(r.url),
@@ -1006,7 +1017,7 @@ const server = http.createServer(async (req, res) => {
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
-        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove",
+        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/usage",
         "/api/backup/create", "/api/backup/delete", "/api/backup/restore",
         "/api/backup/restore-file", "/api/backup/download",
       ]);
@@ -1807,6 +1818,40 @@ const server = http.createServer(async (req, res) => {
         save();
         return json(res, { ok: true });
       }
+      if (route === "/api/library/usage") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        // Map each library addon to the profiles that use it, with the proxy mode
+        // the manager minted (relay grants) or "none" for an original URL. Built
+        // from the background addon mirror so the page renders instantly.
+        const keyToId = new Map(
+          state.library.map((item) => [addonManifestKey(item.url), item.id]),
+        );
+        const usage = Object.fromEntries(state.library.map((item) => [item.id, []]));
+        let oldest = 0;
+        for (const p of historyStore.getAddonUsage(state.accounts)) {
+          oldest = oldest ? Math.min(oldest, p.addonsSync) : p.addonsSync;
+          for (const row of p.addons) {
+            const id = keyToId.get(addonManifestKey(row.url));
+            if (!id) continue; // installed addon not in the manager's library
+            const ref = addonProxy.describe(row.url);
+            usage[id].push({
+              accountId: p.accountId,
+              accountName: p.accountName,
+              provider: p.providerId,
+              profileId: p.profileIndex,
+              profileName: p.profileName,
+              identity: p.identity,
+              mode: ref ? ref.mode : "none",
+              enabled: row.enabled !== false,
+            });
+          }
+        }
+        return json(res, {
+          usage,
+          syncedAt: oldest,
+          synced: oldest > 0,
+        });
+      }
       if (route === "/api/proxy/status") {
         return json(res, await addonProxy.status());
       }
@@ -1887,22 +1932,36 @@ const server = http.createServer(async (req, res) => {
           }
         }
         if (b.assignment) {
-          const item = state.library.find((x) => x.id === b.assignment.id);
-          assert(item, "Addon introuvable");
-          const installUrl = await installation(item, b.assignment.mode, {
-            accountId: a.id,
-            profileId: Number(b.profileId),
-          });
+          // One assignment can target a single addon or several at once (same
+          // mode). "remove" detaches a single addon whatever its current mode.
+          const mode = b.assignment.mode;
+          const ids = Array.isArray(b.assignment.ids) ? b.assignment.ids : [b.assignment.id];
+          assert(ids.length, "Aucun addon sélectionné");
           const rows = writableList(target.addons);
-          const existing = rows.find((x) => x.url === installUrl);
-          if (!existing)
-            rows.push({
-              url: installUrl,
-              name: item.name,
-              enabled: true,
-              sort_order: rows.length,
-            });
-          desired = { addons: rows };
+          const ctx = { accountId: a.id, profileId: Number(b.profileId) };
+          if (mode === "remove") {
+            assert(ids.length === 1, "Le retrait ne concerne qu’un addon");
+            const item = state.library.find((x) => x.id === ids[0]);
+            assert(item, "Addon introuvable");
+            const manifestKey = addonManifestKey(item.url);
+            const kept = rows.filter((x) => addonManifestKey(x.url) !== manifestKey);
+            desired = { addons: kept.map((x, i) => ({ ...x, sort_order: i })) };
+          } else {
+            for (const id of ids) {
+              const item = state.library.find((x) => x.id === id);
+              assert(item, "Addon introuvable");
+              const manifestKey = addonManifestKey(item.url);
+              const installUrl = await installation(item, mode, ctx);
+              const matchIndex = rows.findIndex((x) => addonManifestKey(x.url) === manifestKey);
+              if (matchIndex >= 0)
+                // Already installed: swap the URL (proxy mode change) in place,
+                // keeping its position and enabled flag — no duplicate entry.
+                rows[matchIndex] = { ...rows[matchIndex], url: installUrl, name: item.name };
+              else
+                rows.push({ url: installUrl, name: item.name, enabled: true, sort_order: rows.length });
+            }
+            desired = { addons: rows };
+          }
         }
         assert(desired && typeof desired === "object", "Sélection requise");
         desired = desiredParts(target, desired);
@@ -1997,8 +2056,12 @@ const server = http.createServer(async (req, res) => {
           }
           // After the addon list is written, revoke grants for any addon just
           // removed from this profile (immediate, without waiting for a reload).
-          if (p.desired.addons)
+          if (p.desired.addons) {
             addonProxy.reconcile(p.accountId, p.profileId, p.desired.addons.map((x) => x.url));
+            // Refresh the addon mirror for this profile so the library reflects the
+            // change at once instead of waiting for the next background sync.
+            historyStore.refreshAddons(`${p.accountId}:${p.profileId}`);
+          }
           return json(res, { ok: true, completed, backupId });
         } catch (e) {
           return json(
