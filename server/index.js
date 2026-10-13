@@ -1884,6 +1884,7 @@ const server = http.createServer(async (req, res) => {
       "/app.js": "app.js",
       "/i18n.js": "i18n.js",
       "/i18n/fr.js": "i18n/fr.js",
+      "/i18n/x-fr.js": "i18n/x-fr.js",
       "/i18n/en.js": "i18n/en.js",
       "/i18n/es.js": "i18n/es.js",
       "/i18n/de.js": "i18n/de.js",
@@ -1919,7 +1920,9 @@ const server = http.createServer(async (req, res) => {
     assert(files[url.pathname], "Page introuvable", 404);
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https: http:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      // style-src allows 'unsafe-inline' because charts/bars/timeline set computed
+      // inline styles that can't live in a static stylesheet; script-src stays strict.
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     );
     res.setHeader(
       "Content-Type",
