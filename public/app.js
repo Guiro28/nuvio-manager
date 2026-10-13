@@ -1229,7 +1229,7 @@ async function renderLibrary() {
       ? `<button type="button" class="lib-usage" data-usage="${esc(a.id)}" title="${esc(t("Gérer les profils"))}">${stack(users)}<span class="badge neutral lib-count">${esc(t("{n} profils", { n: users.length }))}</span></button>`
       : `<span class="badge neutral lib-count lib-count-empty">${esc(t("Aucun profil"))}</span>`;
   const card = (a, users) =>
-    `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="lib-row-right">${usageControl(a, users)}<div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></div></article>`;
+    `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="lib-row-right">${usageControl(a, users)}<div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-assign-many="${a.id}">${esc(t("À plusieurs profils"))}</button><button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></div></article>`;
 
   $("#content").innerHTML =
     heading(
@@ -1274,6 +1274,9 @@ async function renderLibrary() {
   );
   $$("[data-assign]").forEach(
     (b) => (b.onclick = () => run(() => assign(b.dataset.assign))),
+  );
+  $$("[data-assign-many]").forEach(
+    (b) => (b.onclick = () => run(() => assignToProfiles(b.dataset.assignMany))),
   );
   $$("[data-delete]").forEach(
     (b) =>
@@ -1399,6 +1402,58 @@ async function bulkAssign() {
         profileId: Number($("#bulk-profile").value),
         assignment: { ids, mode: $("#bulk-mode").value },
       });
+    });
+}
+// Push one library addon to several profiles (across accounts) at once, with one
+// chosen proxy mode. Profiles already using the addon have their mode updated.
+async function assignToProfiles(id) {
+  if (!accountId) return toast(t("Connecte d’abord un compte Nuvio."));
+  const addon = state.library.find((x) => x.id === id);
+  if (!addon) return;
+  const perAccount = await Promise.all(
+    state.accounts.map(async (a) => ({
+      account: a,
+      profiles: await api("profiles?accountId=" + encodeURIComponent(a.id)).catch(() => []),
+    })),
+  );
+  const modeOptions = `<option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · WARP, SOCKS ou HTTP"))}</option>`;
+  const groups = perAccount
+    .map(
+      ({ account, profiles }) =>
+        `<div class="assign-group"><div class="assign-group-head"><span>${esc(account.name || account.email)}${account.provider === "tuvora" ? " · Tuvora" : ""}</span><button type="button" class="quiet" data-group-all="${esc(account.id)}">${esc(t("Tout"))}</button></div>${profiles.length ? profiles.map((p) => `<label class="check-label lib-pick"><input type="checkbox" data-ref="${esc(account.id)}:${p.profile_index}">${profileAvatar(p)}<span class="lib-pick-name">${esc(p.name)} · ${esc(t("Profil {n}", { n: p.profile_index }))}</span></label>`).join("") : `<p class="muted">${esc(t("Aucun profil."))}</p>`}</div>`,
+    )
+    .join("");
+  openDialog(
+    `<h2>${esc(t("Attribuer « {name} » à plusieurs profils", { name: addon.name }))}</h2><div class="form"><label>${esc(t("Mode de connexion"))}<select id="multi-mode">${modeOptions}</select></label><div class="lib-pick-head"><span class="muted">${esc(t("Profils cibles"))}</span><button type="button" id="multi-all" class="quiet">${esc(t("Tout sélectionner"))}</button></div><div class="lib-picklist">${groups}</div><p class="muted">${esc(t("Les profils ayant déjà cet addon verront leur mode mis à jour. Une sauvegarde est créée par profil."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="multi-apply" class="primary">${esc(t("Attribuer"))}</button></div>`,
+  );
+  $$(".profile-avatar").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
+  const boxes = () => $$("#dialog .lib-picklist input[type=checkbox]");
+  $("#multi-all").onclick = () => {
+    const all = boxes().every((b) => b.checked);
+    boxes().forEach((b) => (b.checked = !all));
+    $("#multi-all").textContent = all ? t("Tout sélectionner") : t("Tout désélectionner");
+  };
+  $$("[data-group-all]").forEach((button) => {
+    button.onclick = () => {
+      const group = button.closest(".assign-group");
+      const groupBoxes = [...group.querySelectorAll('input[type=checkbox]')];
+      const all = groupBoxes.every((b) => b.checked);
+      groupBoxes.forEach((b) => (b.checked = !all));
+    };
+  });
+  $("#multi-apply").onclick = () =>
+    run(async () => {
+      const refs = boxes().filter((b) => b.checked).map((b) => b.dataset.ref);
+      if (!refs.length) return toast(t("Sélectionne au moins un profil."));
+      const result = await api("library/assign-many", { id, mode: $("#multi-mode").value, refs });
+      $("#dialog").close();
+      await render();
+      const failed = (result.results || []).filter((r) => !r.ok).length;
+      toast(
+        failed
+          ? t("{n} profil(s) mis à jour, {f} échec(s).", { n: result.applied, f: failed })
+          : t("{n} profil(s) mis à jour.", { n: result.applied }),
+      );
     });
 }
 async function renderCopy() {

@@ -751,6 +751,18 @@ header {
   font-size: 0.85rem;
   font-weight: 700;
 }
+.lib-pick .avatar { position: relative; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; }
+.lib-pick .avatar-fallback { font-size: 0.85rem; }
+.assign-group { margin-bottom: 4px; }
+.assign-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 8px 3px;
+}
+.assign-group-head span { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); }
+.assign-group-head button { padding: 3px 8px; }
 @media (max-width: 720px) {
   .lib-profile { flex-wrap: wrap; }
   .lib-mode { width: 100%; max-width: none; order: 3; }

@@ -1396,4 +1396,13 @@ export default {
   "Addon": "Addon",
   "{opens} flux ouverts · {profiles} profil(s)": "{opens} flujos abiertos · {profiles} perfil(es)",
   "Flux ouverts par profil": "Flujos abiertos por perfil",
+  "À plusieurs profils": "A varios perfiles",
+  "Attribuer « {name} » à plusieurs profils": "Asignar «{name}» a varios perfiles",
+  "Profils cibles": "Perfiles destino",
+  "Tout": "Todo",
+  "Attribuer": "Asignar",
+  "Sélectionne au moins un profil.": "Selecciona al menos un perfil.",
+  "{n} profil(s) mis à jour.": "{n} perfil(es) actualizado(s).",
+  "{n} profil(s) mis à jour, {f} échec(s).": "{n} perfil(es) actualizado(s), {f} fallo(s).",
+  "Les profils ayant déjà cet addon verront leur mode mis à jour. Une sauvegarde est créée par profil.": "Los perfiles que ya usan este addon verán su modo actualizado. Se crea una copia de seguridad por perfil.",
 };

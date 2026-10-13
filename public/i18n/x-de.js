@@ -1396,4 +1396,13 @@ export default {
   "Addon": "Addon",
   "{opens} flux ouverts · {profiles} profil(s)": "{opens} geöffnete Streams · {profiles} Profil(e)",
   "Flux ouverts par profil": "Geöffnete Streams pro Profil",
+  "À plusieurs profils": "An mehrere Profile",
+  "Attribuer « {name} » à plusieurs profils": "„{name}“ mehreren Profilen zuweisen",
+  "Profils cibles": "Zielprofile",
+  "Tout": "Alle",
+  "Attribuer": "Zuweisen",
+  "Sélectionne au moins un profil.": "Wähle mindestens ein Profil aus.",
+  "{n} profil(s) mis à jour.": "{n} Profil(e) aktualisiert.",
+  "{n} profil(s) mis à jour, {f} échec(s).": "{n} Profil(e) aktualisiert, {f} Fehler.",
+  "Les profils ayant déjà cet addon verront leur mode mis à jour. Une sauvegarde est créée par profil.": "Profile, die dieses Addon bereits verwenden, erhalten den aktualisierten Modus. Pro Profil wird eine Sicherung erstellt.",
 };

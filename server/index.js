@@ -1017,7 +1017,7 @@ const server = http.createServer(async (req, res) => {
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
-        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/usage",
+        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/usage", "/api/library/assign-many",
         "/api/backup/create", "/api/backup/delete", "/api/backup/restore",
         "/api/backup/restore-file", "/api/backup/download",
       ]);
@@ -1906,6 +1906,49 @@ const server = http.createServer(async (req, res) => {
           syncedAt: oldest,
           synced: oldest > 0,
         });
+      }
+      if (route === "/api/library/assign-many") {
+        // Push ONE library addon to several profiles at once (same proxy mode).
+        // A profile already using the addon has its mode swapped in place. Each
+        // profile gets its own backup; failures are reported per profile.
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const item = state.library.find((x) => x.id === b.id);
+        assert(item, "Addon introuvable");
+        assert(["none", "direct", "warp"].includes(b.mode), "Mode proxy invalide");
+        const refs = Array.isArray(b.refs) ? [...new Set(b.refs.map(String))] : [];
+        assert(refs.length, "Aucun profil sélectionné");
+        const manifestKey = addonManifestKey(item.url);
+        const results = [];
+        for (const ref of refs) {
+          const [accId, pidStr] = ref.split(":");
+          const profileId = Number(pidStr);
+          const lockKey = `${accId}:${profileId}`;
+          if (locks.has(lockKey)) {
+            results.push({ ref, ok: false, error: "Une écriture est en cours" });
+            continue;
+          }
+          locks.add(lockKey);
+          try {
+            const a = account(accId);
+            const t = await token(a);
+            const target = await profile(t, profileId, a.provider);
+            const rows = writableList(target.addons);
+            const installUrl = await installation(item, b.mode, { accountId: a.id, profileId });
+            const matchIndex = rows.findIndex((x) => addonManifestKey(x.url) === manifestKey);
+            if (matchIndex >= 0) rows[matchIndex] = { ...rows[matchIndex], url: installUrl, name: item.name };
+            else rows.push({ url: installUrl, name: item.name, enabled: true, sort_order: rows.length });
+            const backupId = await backup(a, "Avant attribution multi-profils");
+            await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: rows, ...originId(a) }, t, a.provider);
+            addonProxy.reconcile(a.id, profileId, rows.map((x) => x.url));
+            historyStore.refreshAddons(`${a.id}:${profileId}`);
+            results.push({ ref, ok: true, backupId });
+          } catch (error) {
+            results.push({ ref, ok: false, error: error.message });
+          } finally {
+            locks.delete(lockKey);
+          }
+        }
+        return json(res, { applied: results.filter((r) => r.ok).length, results });
       }
       if (route === "/api/proxy/status") {
         return json(res, await addonProxy.status());
