@@ -479,3 +479,46 @@ test("proxy d'auth externe : en-têtes ignorés hors IP de confiance", async (t)
   });
   assert.equal(state.status, 401);
 });
+
+test("assistant : le mode d'authentification externe est persisté et exploité", async (t) => {
+  const { base } = await startManager(t, {});
+  const before = await (await fetch(base + "/api/setup")).json();
+  assert.equal(before.authProxy, false);
+  assert.equal(before.authProxyManaged, false);
+  const setup = await fetch(base + "/api/setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "admin", password: "test-password-wizard", publicUrl: base, authProxy: true }),
+  });
+  assert.equal(setup.status, 200);
+  const after = await (await fetch(base + "/api/setup")).json();
+  assert.equal(after.authProxy, true);
+  // The proxy identity is trusted without any local session.
+  const headers = { "X-Auth-Request-User": "alice@example.com" };
+  assert.equal((await fetch(base + "/api/state", { headers })).status, 200);
+  // Turning external authentication off re-enables the local login requirement.
+  const off = await fetch(base + "/api/settings/auth-proxy", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(off.status, 200);
+  assert.equal((await fetch(base + "/api/state", { headers })).status, 401);
+});
+
+test("AUTH_PROXY par environnement : le réglage est verrouillé", async (t) => {
+  const { base } = await startManager(t, {
+    ADMIN_USERNAME: "admin",
+    ADMIN_PASSWORD: "test-password-env",
+    AUTH_PROXY: "true",
+  });
+  const initial = await (await fetch(base + "/api/setup")).json();
+  assert.equal(initial.authProxy, true);
+  assert.equal(initial.authProxyManaged, true);
+  const res = await fetch(base + "/api/settings/auth-proxy", {
+    method: "POST",
+    headers: { "X-Auth-Request-User": "alice@example.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(res.status, 409);
+});

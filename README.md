@@ -123,11 +123,16 @@ Le reverse proxy doit transmettre l’en-tête `Host` d’origine (ou `X-Forward
 
 ### Derrière une authentification externe (OAuth)
 
-Le manager fonctionne derrière un portail OAuth (oauth2-proxy, Authelia, Authentik, Cloudflare Access…). Pour éviter l’écran de configuration initial (que l’OAuth peut bloquer), définis `ADMIN_USERNAME`, `ADMIN_PASSWORD` et `PUBLIC_URL` dans le `compose` : le dashboard démarre déjà configuré.
+Le manager fonctionne derrière un portail OAuth (oauth2-proxy, Authelia, Authentik, Cloudflare Access…). À la première ouverture, l’assistant de configuration demande le mode d’**authentification** :
 
-Deux réglages aident selon le niveau d’intégration :
+- **Interne** — le manager a sa propre page de connexion (recommandé en accès direct).
+- **Externe** — derrière oauth2-proxy, Authelia… : le manager fait confiance à l’identité injectée par le proxy (`X-Auth-Request-User` / `X-Forwarded-User`) et entre directement en administrateur, tout en gardant le login local en repli (pas de double connexion).
 
-- **`AUTH_PROXY: "true"`** : le manager fait confiance à l’identité injectée par le proxy (`X-Auth-Request-User` / `X-Forwarded-User`) et entre directement en administrateur, tout en gardant un login local de repli (mode hybride). Restreins les sources avec `TRUST_PROXY_IPS` (IPs/CIDR, défaut : boucle locale + réseau privé).
+Ce choix est modifiable ensuite dans **Paramètres > Authentification externe**. Pour éviter l’écran de configuration initial (que l’OAuth peut bloquer), tu peux aussi définir `ADMIN_USERNAME`, `ADMIN_PASSWORD` et `PUBLIC_URL` dans le `compose` : le dashboard démarre déjà configuré.
+
+Ces deux variables d’environnement restent disponibles (et verrouillent le réglage) pour un déploiement automatisé :
+
+- **`AUTH_PROXY: "true"`** : équivaut au mode « Externe ». Restreins les sources avec `TRUST_PROXY_IPS` (IPs/CIDR, défaut : boucle locale + réseau privé).
 - **`DISABLE_LOGIN: "true"`** : supprime complètement la page de connexion du manager (délégation totale). ⚠️ À n’utiliser **que** derrière une authentification externe : sans page de connexion, toute personne pouvant atteindre le dashboard y a un accès administrateur complet.
 
 Le relais d’addons public `/relay/**` doit être exempté du proxy d’auth (sinon les addons proxyfiés ne fonctionnent plus) : utilise `--skip-auth-route=^/relay/`, un routeur dédié, ou expose-le séparément via `RELAY_PORT`. Évite aussi d’appliquer un middleware qui réécrit les réponses 401/403 du manager.

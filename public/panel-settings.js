@@ -91,6 +91,13 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
     </section>
 
     <section class="panel">
+      <h2>${esc(t("Authentification externe"))}</h2>
+      <p class="muted">${esc(t("Faire confiance à l’identité injectée par un proxy d’auth en amont (oauth2-proxy, Authelia…). À n’activer que si l’application n’est accessible qu’à travers ce proxy contrôlant chaque connexion : sinon un client pourrait forger son identité."))}</p>
+      <label class="check-label"><input type="checkbox" id="auth-proxy" ${config.authProxy ? "checked" : ""} ${config.authProxyManaged ? "disabled" : ""}>${esc(t("Faire confiance au proxy d’authentification"))}</label>
+      ${config.authProxyManaged ? `<p class="muted">${esc(t("Géré par l’environnement (AUTH_PROXY)."))}</p>` : ""}
+    </section>
+
+    <section class="panel">
       <h2>${esc(t("Administrateur du panel (compte local)"))}</h2>
       ${config.adminManaged
         ? `<p class="muted">${esc(t("L’administrateur est géré par l’environnement (compose) et ne peut pas être modifié ici."))}</p>`
@@ -191,6 +198,18 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
         try {
           await api("settings/login", { disabled: event.target.checked });
           toast(event.target.checked ? t("Page de connexion désactivée.") : t("Page de connexion réactivée."));
+        } catch (error) {
+          event.target.checked = !event.target.checked;
+          throw error;
+        }
+      });
+
+  if ($("#auth-proxy") && !config.authProxyManaged)
+    $("#auth-proxy").onchange = (event) =>
+      run(async () => {
+        try {
+          await api("settings/auth-proxy", { enabled: event.target.checked });
+          toast(event.target.checked ? t("Authentification externe activée.") : t("Authentification externe désactivée."));
         } catch (error) {
           event.target.checked = !event.target.checked;
           throw error;

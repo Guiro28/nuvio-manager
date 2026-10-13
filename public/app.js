@@ -1685,7 +1685,17 @@ function login() {
 }
 function setup(publicUrlOnly = false) {
   openDialog(
-    `<div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="76" height="76"><div><h2>${publicUrlOnly ? esc(t("Configurer l’adresse publique")) : esc(t("Créer l’administrateur"))}</h2><p class="muted">${publicUrlOnly ? esc(t("Finalisez la migration de votre dashboard.")) : esc(t("Première configuration de votre dashboard privé."))}</p></div></div><form id="setup-form" class="form">${publicUrlOnly ? "" : `<label>${esc(t("Nom d’utilisateur"))}<input name="username" autocomplete="username" maxlength="80" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label><label>${esc(t("Confirmer le mot de passe"))}<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label>`}<label>${esc(t("Adresse publique du dashboard"))}<input name="publicUrl" type="url" value="${esc(location.origin)}" autocomplete="off" required></label><p class="muted">${esc(t("L’adresse publique servira à générer les URL des addons proxifiés."))}</p><button class="primary">${publicUrlOnly ? esc(t("Enregistrer l’adresse")) : esc(t("Créer l’administrateur"))}</button><p id="setup-error" class="error" hidden></p></form>`,
+    `<div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="76" height="76"><div><h2>${publicUrlOnly ? esc(t("Configurer l’adresse publique")) : esc(t("Créer l’administrateur"))}</h2><p class="muted">${publicUrlOnly ? esc(t("Finalisez la migration de votre dashboard.")) : esc(t("Première configuration de votre dashboard privé."))}</p></div></div><form id="setup-form" class="form">${publicUrlOnly ? "" : `<label>${esc(t("Nom d’utilisateur"))}<input name="username" autocomplete="username" maxlength="80" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label><label>${esc(t("Confirmer le mot de passe"))}<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label><fieldset class="auth-mode"><legend>${esc(t("Authentification"))}</legend><label class="check-label"><input type="radio" name="authMode" value="internal" checked>${esc(t("Interne — le manager a sa propre page de connexion (recommandé en accès direct)"))}</label><label class="check-label"><input type="radio" name="authMode" value="external">${esc(t("Externe — derrière oauth2-proxy, Authelia…"))}</label><p id="auth-mode-warning" class="muted" hidden>${esc(t("Sans authentification interne, l’application accorde un accès complet à toute requête qui lui parvient. Elle ne doit être accessible que derrière un proxy qui contrôle chaque connexion."))}</p><label id="auth-mode-ack" class="check-label" hidden><input type="checkbox" name="authModeAck">${esc(t("Je confirme que le port de l’application n’est pas exposé directement et que le proxy amont contrôle chaque accès."))}</label></fieldset>`}<label>${esc(t("Adresse publique du dashboard"))}<input name="publicUrl" type="url" value="${esc(location.origin)}" autocomplete="off" required></label><p class="muted">${esc(t("L’adresse publique servira à générer les URL des addons proxifiés."))}</p><button class="primary">${publicUrlOnly ? esc(t("Enregistrer l’adresse")) : esc(t("Créer l’administrateur"))}</button><p id="setup-error" class="error" hidden></p></form>`,
+  );
+  const authModeToggle = (external) => {
+    const warn = $("#auth-mode-warning"), ack = $("#auth-mode-ack");
+    if (warn) warn.hidden = !external;
+    if (ack) ack.hidden = !external;
+    const checkbox = ack?.querySelector("input");
+    if (!external && checkbox) checkbox.checked = false;
+  };
+  $$('input[name="authMode"]').forEach(
+    (radio) => (radio.onchange = () => authModeToggle(radio.value === "external")),
   );
   $("#setup-form").onsubmit = async (event) => {
     event.preventDefault();
@@ -1695,11 +1705,18 @@ function setup(publicUrlOnly = false) {
       $("#setup-error").textContent = t("Les deux mots de passe ne correspondent pas.");
       return;
     }
+    const external = !publicUrlOnly && values.authMode === "external";
+    if (external && values.authModeAck !== "on") {
+      $("#setup-error").hidden = false;
+      $("#setup-error").textContent = t("Veuillez confirmer l’utilisation de l’authentification externe.");
+      return;
+    }
     try {
       const result = await api("setup", {
         username: values.username,
         password: values.password,
         publicUrl: values.publicUrl,
+        authProxy: external,
       });
       $("#dialog").close();
       if (result.requiresLogin) login();
