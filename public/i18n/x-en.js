@@ -1369,4 +1369,12 @@ export default {
   "Synchronisation terminée.": "Synchronization complete.",
   "Connectez-vous avec votre compte Nuvio ou Tuvora.": "Sign in with your Nuvio or Tuvora account.",
   "Compte administrateur du dashboard.": "Dashboard administrator account.",
+  "L’adresse publique servira à générer les URL des addons proxifiés.": "The public URL is used to generate proxied addon URLs.",
+  "Page de connexion": "Login page",
+  "À n’activer que derrière une authentification externe (OAuth) : sans page de connexion, toute personne pouvant atteindre le dashboard y dispose d’un accès administrateur complet.": "Only enable behind an external authentication (OAuth): without a login page, anyone able to reach the dashboard has full administrator access.",
+  "Désactiver la page de connexion": "Disable the login page",
+  "Géré par l’environnement (DISABLE_LOGIN).": "Managed by the environment (DISABLE_LOGIN).",
+  "L’administrateur est géré par l’environnement (compose) et ne peut pas être modifié ici.": "The administrator is managed by the environment (compose) and cannot be changed here.",
+  "Page de connexion désactivée.": "Login page disabled.",
+  "Page de connexion réactivée.": "Login page re-enabled.",
 };

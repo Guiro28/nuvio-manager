@@ -148,15 +148,14 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
     child.stdout.on("data", (chunk) => {
       output += chunk;
       const m = output.match(/http:\/\/localhost:(\d+)/);
-      const code = output.match(/Code de configuration : ([A-F0-9]+)/);
-      if (m && code) {
+      if (m) {
         clearTimeout(timer);
-        resolve({ base: "http://127.0.0.1:" + m[1], setupCode: code[1] });
+        resolve({ base: "http://127.0.0.1:" + m[1] });
       }
     });
     child.once("error", reject);
   });
-  const { base, setupCode } = startup;
+  const { base } = startup;
   let cookie = "";
   const call = async (route, data, extra = {}) => {
     const res = await fetch(base + "/api/" + route, {
@@ -175,9 +174,7 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   };
   assert.equal((await call("setup")).data.required, true);
   assert.equal((await call("state")).status, 428);
-  assert.equal((await call("setup", { code: "INVALID", username: "admin", password: "test-password", publicUrl: base })).status, 403);
   const setup = await call("setup", {
-    code: setupCode,
     username: "admin",
     password: "test-password",
     publicUrl: base,
@@ -185,7 +182,7 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.equal(setup.status, 200);
   cookie = setup.cookie.split(";")[0];
   assert.equal((await call("setup")).data.required, false);
-  assert.equal((await call("setup", { code: setupCode, username: "other", password: "another-password", publicUrl: base })).status, 409);
+  assert.equal((await call("setup", { username: "other", password: "another-password", publicUrl: base })).status, 409);
   assert.equal(
     (await call("pair/start", {}, { Origin: "https://evil.example" })).status,
     403,
@@ -365,10 +362,9 @@ test("an existing administrator can securely migrate the public URL", async (t) 
     child.stdout.on("data", (chunk) => {
       output += chunk;
       const portMatch = output.match(/http:\/\/localhost:(\d+)/);
-      const codeMatch = output.match(/Code de configuration : ([A-F0-9]+)/);
-      if (portMatch && codeMatch) {
+      if (portMatch) {
         clearTimeout(timer);
-        resolve({ base: `http://127.0.0.1:${portMatch[1]}`, code: codeMatch[1] });
+        resolve({ base: `http://127.0.0.1:${portMatch[1]}` });
       }
     });
     child.once("error", reject);
@@ -382,7 +378,7 @@ test("an existing administrator can securely migrate the public URL", async (t) 
   const before = await request("setup");
   assert.equal(before.data.required, false);
   assert.equal(before.data.publicUrlRequired, true);
-  assert.equal((await request("setup", { code: startup.code, publicUrl: startup.base })).data.requiresLogin, true);
+  assert.equal((await request("setup", { publicUrl: startup.base })).data.requiresLogin, true);
   const after = await request("setup");
   assert.equal(after.data.publicUrlRequired, false);
   assert.equal((await request("login", { user: "existing-admin", password: "existing-password" })).status, 200);

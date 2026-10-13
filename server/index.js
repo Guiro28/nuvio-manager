@@ -71,9 +71,13 @@ const tmdbCache = db.read("tmdb-cache", { version: 1, entries: {}, genres: {} })
 const trackerCache = db.read("tracker-cache", { entries: {} });
 const authEnabled = () => Boolean(panel.admin);
 const setupRequired = () => !panel.admin;
-const setupCode = setupRequired() || !panel.publicUrl ? crypto.randomBytes(8).toString("hex").toUpperCase() : "";
 const adminName = () => panel.admin?.username || "";
 const validPassword = value => verifyPassword(value, panel.admin);
+// When login is disabled (behind an external OAuth), the manager performs no
+// auth of its own and treats every request as the admin.
+const loginDisabled = () => panel.loginDisabled === true;
+let adminFromEnv = false; // admin set via ADMIN_* env -> hide the admin editor
+let loginManagedByEnv = false; // DISABLE_LOGIN env present -> lock the UI toggle
 const pairings = new Map(),
   plans = new Map(),
   locks = new Set(),
@@ -185,6 +189,55 @@ const requestLang = (req) => {
 };
 const trackerConfig = (service) => panel.trackerApps?.[service] || {};
 const savePanel = () => db.write("panel-settings", panel);
+
+// Bootstrap configuration from environment variables (compose-friendly). When
+// set, these win over stored values and let the manager come up fully configured
+// without the first-run setup screen — handy behind an external OAuth proxy.
+//   ADMIN_USERNAME + ADMIN_PASSWORD : create/sync the local admin (password ≥ 12).
+//   PUBLIC_URL                      : public HTTPS origin used for addon URLs.
+function applyEnvConfig() {
+  let changed = false;
+  if (process.env.PUBLIC_URL) {
+    try {
+      const origin = normalizePublicUrl(process.env.PUBLIC_URL);
+      if (panel.publicUrl !== origin) {
+        panel.publicUrl = origin;
+        changed = true;
+      }
+    } catch {
+      console.error("PUBLIC_URL ignorée (adresse invalide) :", process.env.PUBLIC_URL);
+    }
+  }
+  const user = String(process.env.ADMIN_USERNAME || "").trim();
+  const pass = String(process.env.ADMIN_PASSWORD || "");
+  if (user && pass) {
+    if (pass.length < 12) {
+      console.error("ADMIN_PASSWORD ignoré : 12 caractères minimum requis.");
+    } else {
+      adminFromEnv = true;
+      if (
+        !panel.admin ||
+        panel.admin.username !== user.slice(0, 80) ||
+        !verifyPassword(pass, panel.admin)
+      ) {
+        panel.admin = { ...hashPassword(pass), username: user.slice(0, 80) };
+        changed = true;
+        console.log(`Administrateur « ${user.slice(0, 80)} » configuré depuis l’environnement.`);
+      }
+    }
+  }
+  if (process.env.DISABLE_LOGIN !== undefined) {
+    loginManagedByEnv = true;
+    const want = /^(1|true|yes|on)$/i.test(process.env.DISABLE_LOGIN);
+    if (panel.loginDisabled !== want) {
+      panel.loginDisabled = want;
+      changed = true;
+    }
+    if (want) console.log("Page de connexion désactivée (DISABLE_LOGIN).");
+  }
+  if (changed) savePanel();
+}
+applyEnvConfig();
 
 // After each history sync, warm the TMDB cache for every title in the store so
 // stats (any period / profile selection) never wait on TMDB. Default locale
@@ -629,16 +682,22 @@ const server = http.createServer(async (req, res) => {
           403,
         );
       }
+      // PUBLIC_URL's own host is the trusted host; localhost covers direct access.
       const allowedHosts = new Set([
-        new URL(publicOrigin()).host,
+        new URL(publicOrigin()).host.toLowerCase(),
         `localhost:${port}`,
         `127.0.0.1:${port}`,
       ]);
+      // Honor X-Forwarded-Host so the manager works behind a reverse proxy /
+      // external OAuth: a match only ever passes for an explicitly allowed host.
+      const reqHost = String(req.headers.host || "").toLowerCase();
+      const fwdHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim().toLowerCase();
+      const hostAllowed = allowedHosts.has(reqHost) || (fwdHost && allowedHosts.has(fwdHost));
       if (port !== 0 && url.pathname !== "/api/setup")
-        assert(allowedHosts.has(req.headers.host), "Hôte non autorisé", 403);
+        assert(hostAllowed, "Hôte non autorisé", 403);
       if (url.pathname === "/api/version") return json(res, APP_VERSION);
       if (url.pathname === "/api/setup") {
-        if (req.method === "GET") return json(res, { required: setupRequired(), publicUrlRequired: !panel.publicUrl });
+        if (req.method === "GET") return json(res, { required: setupRequired(), publicUrlRequired: !panel.publicUrl, loginDisabled: loginDisabled() });
         assert(req.method === "POST", "Méthode non autorisée", 405);
         assert(setupRequired() || !panel.publicUrl, "La configuration initiale est déjà terminée", 409);
         const b = await body(req),
@@ -648,7 +707,6 @@ const server = http.createServer(async (req, res) => {
         assert(active.length < 10, "Réessaie dans une minute", 429);
         active.push(Date.now());
         attempts.set(ip, active);
-        assert(typeof b.code === "string" && equal(b.code.trim().toUpperCase(), setupCode), "Code de configuration incorrect", 403);
         const createAdmin = setupRequired();
         if (createAdmin) {
           assert(typeof b.username === "string" && b.username.trim().length > 0 && b.username.trim().length <= 80, "Nom d’utilisateur requis (80 caractères maximum)");
@@ -735,9 +793,11 @@ const server = http.createServer(async (req, res) => {
         sessions.delete(sid);
         saveSessions();
       }
-      assert(!setupRequired(), "Configuration initiale requise", 428);
-      assert(authEnabled() && session && session.exp > Date.now(), "Connexion au dashboard requise", 401);
-      const viewer = session.role === "nuvio"
+      if (!loginDisabled()) {
+        assert(!setupRequired(), "Configuration initiale requise", 428);
+        assert(authEnabled() && session && session.exp > Date.now(), "Connexion au dashboard requise", 401);
+      }
+      const viewer = (!loginDisabled() && session?.role === "nuvio")
         ? { role: "nuvio", account: session.account }
         : { role: "admin", account: null };
       const uiLang = requestLang(req);
@@ -757,6 +817,7 @@ const server = http.createServer(async (req, res) => {
         "/api/settings", "/api/settings/tmdb", "/api/settings/proxy", "/api/settings/public-url",
         "/api/settings/proxy/test", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
         "/api/settings/history", "/api/history/status", "/api/history/sync",
+        "/api/settings/login",
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
@@ -797,6 +858,9 @@ const server = http.createServer(async (req, res) => {
           tmdbConfigured: Boolean(panel.tmdbKey),
           externalProxy,
           isLocalAdmin,
+          adminManaged: adminFromEnv,
+          loginDisabled: loginDisabled(),
+          loginManaged: loginManagedByEnv,
           adminAccounts: adminAccountIds,
           accounts: state.accounts.map(({ id, email, name }) => ({ id, email, name: name || email })),
           trackers: {
@@ -837,6 +901,14 @@ const server = http.createServer(async (req, res) => {
         await historyStore.syncAll({ force: true });
         statisticsCache.clear();
         return json(res, historyStore.status());
+      }
+      if (route === "/api/settings/login") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(!loginManagedByEnv, "La page de connexion est gérée par l’environnement (DISABLE_LOGIN).", 409);
+        assert(typeof b.disabled === "boolean", "Valeur attendue", 400);
+        panel.loginDisabled = b.disabled;
+        savePanel();
+        return json(res, { ok: true, loginDisabled: panel.loginDisabled });
       }
       if (route === "/api/settings/tmdb") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
@@ -880,6 +952,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (route === "/api/settings/admin") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(!adminFromEnv, "L’administrateur est géré par l’environnement (compose).", 409);
         assert(isLocalAdmin, "Seul le compte local peut modifier ses identifiants", 403);
         const ip = req.socket.remoteAddress, active = (attempts.get(ip) || []).filter(t=>Date.now()-t<60000);
         assert(active.length < 10, "Réessaie dans une minute", 429);
@@ -1875,10 +1948,13 @@ server.listen(port, host, () => {
   // Start the background history mirror (initial fill + periodic refresh).
   if (!setupRequired()) historyStore.start();
   if (setupRequired()) {
-    console.log("Configuration initiale requise.");
-    console.log(`Code de configuration : ${setupCode}`);
+    console.log(
+      "Configuration initiale requise : ouvre le dashboard pour créer l’administrateur,",
+    );
+    console.log(
+      "ou définis ADMIN_USERNAME / ADMIN_PASSWORD (et PUBLIC_URL) dans l’environnement.",
+    );
   } else if (!panel.publicUrl) {
-    console.log("Adresse publique à configurer.");
-    console.log(`Code de configuration : ${setupCode}`);
+    console.log("Adresse publique à configurer dans les paramètres (ou via PUBLIC_URL).");
   }
 });

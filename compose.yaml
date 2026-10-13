@@ -6,6 +6,17 @@ services:
     restart: unless-stopped
     ports:
       - "3100:3100"
+    environment:
+      # Administrateur créé/synchronisé au démarrage (sinon, création au 1er accès).
+      # ADMIN_USERNAME: admin
+      # ADMIN_PASSWORD: change-moi-12-caracteres-minimum
+      # Adresse publique HTTPS du dashboard. Son hôte est aussi l'hôte de
+      # confiance (derrière un reverse proxy / une OAuth externe) ; le serveur
+      # accepte en plus l'en-tête X-Forwarded-Host transmis par le proxy.
+      # PUBLIC_URL: https://manager.example.com
+      # Désactiver la page de connexion du manager (UNIQUEMENT derrière une
+      # authentification externe type OAuth : sinon l'accès est ouvert en admin).
+      # DISABLE_LOGIN: "true"
     volumes:
       - manager-data:/app/data
 volumes:

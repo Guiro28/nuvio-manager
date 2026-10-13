@@ -70,13 +70,25 @@ Ouvrir ensuite :
 http://ADRESSE-DU-SERVEUR:3100
 ```
 
-Lors de la première ouverture, le dashboard demande :
+Au premier démarrage, l’administrateur peut être créé de deux façons :
 
-- Le code affiché par `docker logs nuvio-manager`.
-- Le nom et le mot de passe de l’administrateur.
-- L’adresse publique du dashboard.
+- **Depuis le `compose`** (recommandé, notamment derrière une authentification externe) en définissant les variables d’environnement :
 
-Aucun fichier `.env` n’est nécessaire.
+  ```yaml
+  environment:
+    ADMIN_USERNAME: admin
+    ADMIN_PASSWORD: change-moi-12-caracteres-minimum   # 12 caractères minimum
+    PUBLIC_URL: https://manager.example.com            # adresse publique HTTPS (= hôte de confiance)
+    # DISABLE_LOGIN: "true"                            # désactive la page de connexion (voir ci-dessous)
+  ```
+
+  Quand l’administrateur est défini par l’environnement, sa modification est masquée dans les paramètres.
+
+  Ces valeurs sont appliquées à chaque démarrage (elles priment sur la configuration stockée) : le dashboard s’ouvre déjà configuré, sans écran de première configuration.
+
+- **Sinon, à la première ouverture**, le dashboard demande le nom d’utilisateur, le mot de passe de l’administrateur et l’adresse publique. (Il n’y a plus de code de configuration.)
+
+Le mot de passe de l’administrateur n’est jamais stocké en clair.
 
 ## Variante avec WARP
 
@@ -106,6 +118,14 @@ manager.example.com {
     reverse_proxy 127.0.0.1:3100
 }
 ```
+
+Le reverse proxy doit transmettre l’en-tête `Host` d’origine (ou `X-Forwarded-Host`, également accepté). Renseigne le domaine dans `PUBLIC_URL` : son hôte devient automatiquement l’hôte de confiance.
+
+### Derrière une authentification externe (OAuth)
+
+Le manager fonctionne derrière un portail OAuth (oauth2-proxy, Authelia, Authentik, Cloudflare Access…). Pour éviter l’écran de configuration initial (que l’OAuth peut bloquer), définis `ADMIN_USERNAME`, `ADMIN_PASSWORD` et `PUBLIC_URL` dans le `compose` : le dashboard démarre déjà configuré. Vérifie que la couche OAuth transmet bien les cookies aux requêtes XHR `/api/*`, et que le `Host`/`X-Forwarded-Host` correspond à `PUBLIC_URL`.
+
+Pour éviter de s’authentifier deux fois (une fois à l’OAuth, une fois au manager), tu peux **désactiver la page de connexion** du manager avec `DISABLE_LOGIN: "true"` (ou l’option dans **Paramètres > Page de connexion**). ⚠️ À n’utiliser **que** derrière une authentification externe : sans page de connexion, toute personne pouvant atteindre le dashboard y a un accès administrateur complet.
 
 ## Mise à jour
 

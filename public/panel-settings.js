@@ -84,8 +84,17 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
     </section>` : ""}
 
     <section class="panel">
+      <h2>${esc(t("Page de connexion"))}</h2>
+      <p class="muted">${esc(t("À n’activer que derrière une authentification externe (OAuth) : sans page de connexion, toute personne pouvant atteindre le dashboard y dispose d’un accès administrateur complet."))}</p>
+      <label class="check-label"><input type="checkbox" id="login-disabled" ${config.loginDisabled ? "checked" : ""} ${config.loginManaged ? "disabled" : ""}>${esc(t("Désactiver la page de connexion"))}</label>
+      ${config.loginManaged ? `<p class="muted">${esc(t("Géré par l’environnement (DISABLE_LOGIN)."))}</p>` : ""}
+    </section>
+
+    <section class="panel">
       <h2>${esc(t("Administrateur du panel (compte local)"))}</h2>
-      ${config.isLocalAdmin === false
+      ${config.adminManaged
+        ? `<p class="muted">${esc(t("L’administrateur est géré par l’environnement (compose) et ne peut pas être modifié ici."))}</p>`
+        : config.isLocalAdmin === false
         ? `<p class="muted">${esc(t("Ces identifiants ne peuvent être modifiés que depuis la connexion locale (compte administrateur local)."))}</p>`
         : `<p class="muted">${config.authEnabled ? esc(t("Le mot de passe actuel est requis pour modifier les identifiants.")) : esc(t("L’accès local est actuellement sans mot de passe. Définis un mot de passe pour activer la connexion administrateur."))}</p>
       <form id="admin-form" class="form">
@@ -175,6 +184,18 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
     $("#history-result").textContent = t("Synchronisation terminée.");
     toast(t("Synchronisation terminée."));
   });
+
+  if ($("#login-disabled") && !config.loginManaged)
+    $("#login-disabled").onchange = (event) =>
+      run(async () => {
+        try {
+          await api("settings/login", { disabled: event.target.checked });
+          toast(event.target.checked ? t("Page de connexion désactivée.") : t("Page de connexion réactivée."));
+        } catch (error) {
+          event.target.checked = !event.target.checked;
+          throw error;
+        }
+      });
 
   container.querySelectorAll("[data-admin-account]").forEach((box) => {
     box.onchange = () => run(async () => {

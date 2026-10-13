@@ -1679,7 +1679,7 @@ function login() {
 }
 function setup(publicUrlOnly = false) {
   openDialog(
-    `<div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="76" height="76"><div><h2>${publicUrlOnly ? esc(t("Configurer l’adresse publique")) : esc(t("Créer l’administrateur"))}</h2><p class="muted">${publicUrlOnly ? esc(t("Finalisez la migration de votre dashboard.")) : esc(t("Première configuration de votre dashboard privé."))}</p></div></div><form id="setup-form" class="form"><label>${esc(t("Code de configuration"))}<input name="code" autocomplete="one-time-code" maxlength="32" placeholder="${esc(t("Code affiché dans les journaux Docker"))}" required></label>${publicUrlOnly ? "" : `<label>${esc(t("Nom d’utilisateur"))}<input name="username" autocomplete="username" maxlength="80" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label><label>${esc(t("Confirmer le mot de passe"))}<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label>`}<label>${esc(t("Adresse publique du dashboard"))}<input name="publicUrl" type="url" value="${esc(location.origin)}" autocomplete="off" required></label><p class="muted">${t("Récupérez le code avec {code}. L’adresse publique servira à générer les URL des addons proxifiés.", { code: "<code>docker logs nuvio-manager</code>" })}</p><button class="primary">${publicUrlOnly ? esc(t("Enregistrer l’adresse")) : esc(t("Créer l’administrateur"))}</button><p id="setup-error" class="error" hidden></p></form>`,
+    `<div class="login-brand"><img src="/assets/nuvio-manager-logo.png" alt="" width="76" height="76"><div><h2>${publicUrlOnly ? esc(t("Configurer l’adresse publique")) : esc(t("Créer l’administrateur"))}</h2><p class="muted">${publicUrlOnly ? esc(t("Finalisez la migration de votre dashboard.")) : esc(t("Première configuration de votre dashboard privé."))}</p></div></div><form id="setup-form" class="form">${publicUrlOnly ? "" : `<label>${esc(t("Nom d’utilisateur"))}<input name="username" autocomplete="username" maxlength="80" required></label><label>${esc(t("Mot de passe"))}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label><label>${esc(t("Confirmer le mot de passe"))}<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required></label>`}<label>${esc(t("Adresse publique du dashboard"))}<input name="publicUrl" type="url" value="${esc(location.origin)}" autocomplete="off" required></label><p class="muted">${esc(t("L’adresse publique servira à générer les URL des addons proxifiés."))}</p><button class="primary">${publicUrlOnly ? esc(t("Enregistrer l’adresse")) : esc(t("Créer l’administrateur"))}</button><p id="setup-error" class="error" hidden></p></form>`,
   );
   $("#setup-form").onsubmit = async (event) => {
     event.preventDefault();
@@ -1691,7 +1691,6 @@ function setup(publicUrlOnly = false) {
     }
     try {
       const result = await api("setup", {
-        code: values.code,
         username: values.username,
         password: values.password,
         publicUrl: values.publicUrl,
@@ -1724,7 +1723,12 @@ run(async () => {
   const loading = $("#content");
   if (loading) loading.innerHTML = `<p>${esc(t("app.loading"))}</p>`;
   const initial = await api("setup");
-  if (initial.required) setup();
+  if (initial.loginDisabled) {
+    // External auth in front: no manager login screen, go straight in.
+    const logout = $("#logout");
+    if (logout) logout.hidden = true;
+    await render();
+  } else if (initial.required) setup();
   else if (initial.publicUrlRequired) setup(true);
   else await render();
 });
