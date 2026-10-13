@@ -1362,4 +1362,5 @@ export default {
   "L’administrateur est géré par l’environnement (compose) et ne peut pas être modifié ici.": "El administrador está gestionado por el entorno (compose) y no se puede cambiar aquí.",
   "Page de connexion désactivée.": "Página de inicio de sesión desactivada.",
   "Page de connexion réactivée.": "Página de inicio de sesión reactivada.",
+  "Réponse inattendue du serveur ({status}).": "Respuesta inesperada del servidor ({status}).",
 };

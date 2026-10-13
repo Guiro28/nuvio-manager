@@ -1362,4 +1362,5 @@ export default {
   "L’administrateur est géré par l’environnement (compose) et ne peut pas être modifié ici.": "Der Administrator wird über die Umgebung (compose) verwaltet und kann hier nicht geändert werden.",
   "Page de connexion désactivée.": "Anmeldeseite deaktiviert.",
   "Page de connexion réactivée.": "Anmeldeseite wieder aktiviert.",
+  "Réponse inattendue du serveur ({status}).": "Unerwartete Serverantwort ({status}).",
 };

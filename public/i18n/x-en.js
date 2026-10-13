@@ -1377,4 +1377,5 @@ export default {
   "L’administrateur est géré par l’environnement (compose) et ne peut pas être modifié ici.": "The administrator is managed by the environment (compose) and cannot be changed here.",
   "Page de connexion désactivée.": "Login page disabled.",
   "Page de connexion réactivée.": "Login page re-enabled.",
+  "Réponse inattendue du serveur ({status}).": "Unexpected server response ({status}).",
 };
