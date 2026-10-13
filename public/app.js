@@ -1232,8 +1232,7 @@ async function renderLibrary() {
     heading(
       t("nav.library"),
       t("Chaque addon montre les profils qui l’utilisent. Changez le mode de proxy profil par profil."),
-      (state.library.length ? btn(t("Attribuer plusieurs addons"), "bulk-assign") : "") +
-        btn(t("＋ Ajouter un addon"), "new-addon", "primary"),
+      `<div class="header-actions">${state.library.length ? btn(t("Attribuer plusieurs addons"), "bulk-assign") : ""}${btn(t("＋ Ajouter un addon"), "new-addon", "primary")}</div>`,
     ) +
     (state.library.length
       ? `<div class="list" id="library-list"><p class="muted lib-loading">${esc(t("Chargement…"))}</p></div>`
@@ -1343,7 +1342,7 @@ async function assign(id) {
   if (!accountId) return toast(t("Connecte d’abord un compte Nuvio."));
   await loadProfiles();
   openDialog(
-    `<h2>${esc(t("Attribuer l’addon"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="assign-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="assign-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="assign-mode"><option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · WARP, SOCKS ou HTTP"))}</option></select></label><p class="muted">${esc(t("L’adresse du proxy externe se configure dans Paramètres. Les URL publiques du dashboard doivent rester accessibles depuis vos appareils."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="assign-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
+    `<h2>${esc(t("Attribuer l’addon"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="assign-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="assign-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="assign-mode"><option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · WARP, SOCKS ou HTTP"))}</option></select></label></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="assign-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
   );
   $("#assign-account").onchange = (e) =>
     run(async () => {
@@ -1369,11 +1368,11 @@ async function bulkAssign() {
   const checklist = state.library
     .map(
       (a) =>
-        `<label class="check-label lib-pick"><input type="checkbox" value="${esc(a.id)}"><span class="addon-logo addon-logo-sm"><span>${esc((a.name || "A").slice(0, 1).toUpperCase())}</span></span><span class="lib-pick-name">${esc(a.name)}</span></label>`,
+        `<label class="check-label lib-pick"><input type="checkbox" value="${esc(a.id)}"><span class="addon-logo addon-logo-sm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${HOME_ICONS.puzzle}"></path></svg></span><span class="lib-pick-name">${esc(a.name)}</span></label>`,
     )
     .join("");
   openDialog(
-    `<h2>${esc(t("Attribuer plusieurs addons"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="bulk-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="bulk-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="bulk-mode">${modeOptions}</select></label><div class="lib-pick-head"><span class="muted">${esc(t("Addons à ajouter"))}</span><button type="button" id="bulk-all" class="quiet">${esc(t("Tout sélectionner"))}</button></div><div class="lib-picklist">${checklist}</div><p class="muted">${esc(t("Les addons déjà présents sur ce profil verront leur mode mis à jour."))}</p><p class="muted">${esc(t("L’adresse du proxy externe se configure dans Paramètres. Les URL publiques du dashboard doivent rester accessibles depuis vos appareils."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="bulk-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
+    `<h2>${esc(t("Attribuer plusieurs addons"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="bulk-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="bulk-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="bulk-mode">${modeOptions}</select></label><div class="lib-pick-head"><span class="muted">${esc(t("Addons à ajouter"))}</span><button type="button" id="bulk-all" class="quiet">${esc(t("Tout sélectionner"))}</button></div><div class="lib-picklist">${checklist}</div><p class="muted">${esc(t("Les addons déjà présents sur ce profil verront leur mode mis à jour."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="bulk-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
   );
   $("#bulk-account").onchange = (e) =>
     run(async () => {
