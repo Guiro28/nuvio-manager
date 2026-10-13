@@ -18,6 +18,21 @@ Deux authentifications cohabitent (« mode hybride ») :
 Seules les requêtes venant d'une source de confiance peuvent poser ces
 en-têtes : un client externe ne peut pas les falsifier.
 
+## Choix du mode dans l'application
+
+À la première ouverture, l'assistant de configuration propose le mode
+d'authentification :
+
+- **Interne** — le manager a sa propre page de connexion ;
+- **Externe** — derrière un proxy d'auth : le manager fait confiance à l'identité
+  injectée par le proxy et conserve le login local en repli (mode hybride
+  ci-dessus). Un avertissement rappelle que l'application ne doit alors être
+  joignable qu'à travers un proxy contrôlant chaque connexion.
+
+Le réglage est modifiable dans **Paramètres > Authentification externe**. Les
+variables d'environnement `AUTH_PROXY` / `DISABLE_LOGIN` restent prioritaires et
+verrouillent l'interface.
+
 ## Variables d'environnement
 
 | Variable            | Défaut                         | Rôle |

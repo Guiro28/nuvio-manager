@@ -43,6 +43,9 @@ const host = process.env.HOST || "127.0.0.1",
 //   TRUST_PROXY_IPS : comma-separated IPs/CIDRs allowed to set those headers
 //                     (default: loopback + private ranges, i.e. a Docker net).
 //   AUTH_PROXY      : trust the proxy identity header as the dashboard admin.
+//                     Same as the "external authentication" option chosen in the
+//                     first-run wizard / Settings (panel.authProxy); when set, the
+//                     environment wins and locks the UI toggle.
 //   SESSION_SAMESITE: Lax|Strict|None for the nm_session cookie (default Lax so
 //                     an OAuth redirect round-trip keeps the cookie).
 //   SESSION_DOMAIN  : optional Domain attribute for that cookie.
@@ -138,8 +141,12 @@ const proxyIdentity = (req) =>
       req.headers["x-forwarded-user"] ||
       "",
   ).trim();
+// External authentication can be enabled either by the environment (AUTH_PROXY,
+// which locks the setting) or by the dashboard itself (panel.authProxy, chosen in
+// the first-run wizard or in Settings).
 const authProxyEnabled = () =>
-  /^(1|true|yes|on)$/i.test(String(process.env.AUTH_PROXY || ""));
+  /^(1|true|yes|on)$/i.test(String(process.env.AUTH_PROXY || "")) ||
+  panel.authProxy === true;
 // Deriving the public origin from X-Forwarded-* is only safe when the operator
 // explicitly declared a reverse proxy (either a trust list or AUTH_PROXY);
 // otherwise the secure default (PUBLIC_URL, else localhost) is kept.
@@ -198,6 +205,7 @@ const validPassword = value => verifyPassword(value, panel.admin);
 const loginDisabled = () => panel.loginDisabled === true;
 let adminFromEnv = false; // admin set via ADMIN_* env -> hide the admin editor
 let loginManagedByEnv = false; // DISABLE_LOGIN env present -> lock the UI toggle
+let authProxyManagedByEnv = false; // AUTH_PROXY env present -> lock the UI toggle
 const pairings = new Map(),
   plans = new Map(),
   locks = new Set(),
@@ -389,6 +397,14 @@ function applyEnvConfig() {
       changed = true;
     }
     if (want) console.log("Page de connexion désactivée (DISABLE_LOGIN).");
+  }
+  if (process.env.AUTH_PROXY !== undefined) {
+    authProxyManagedByEnv = true;
+    const want = /^(1|true|yes|on)$/i.test(process.env.AUTH_PROXY);
+    if (panel.authProxy !== want) {
+      panel.authProxy = want;
+      changed = true;
+    }
   }
   if (changed) savePanel();
 }
@@ -853,7 +869,7 @@ const server = http.createServer(async (req, res) => {
         assert(hostAllowed, "Hôte non autorisé", 403);
       if (url.pathname === "/api/version") return json(res, APP_VERSION);
       if (url.pathname === "/api/setup") {
-        if (req.method === "GET") return json(res, { required: setupRequired(), publicUrlRequired: !panel.publicUrl, loginDisabled: loginDisabled() });
+        if (req.method === "GET") return json(res, { required: setupRequired(), publicUrlRequired: !panel.publicUrl, loginDisabled: loginDisabled(), authProxy: authProxyEnabled(), authProxyManaged: authProxyManagedByEnv });
         assert(req.method === "POST", "Méthode non autorisée", 405);
         assert(setupRequired() || !panel.publicUrl, "La configuration initiale est déjà terminée", 409);
         const b = await body(req),
@@ -868,6 +884,10 @@ const server = http.createServer(async (req, res) => {
           assert(typeof b.username === "string" && b.username.trim().length > 0 && b.username.trim().length <= 80, "Nom d’utilisateur requis (80 caractères maximum)");
           assert(typeof b.password === "string" && b.password.length >= 12 && b.password.length <= 1024, "Le mot de passe doit contenir au moins 12 caractères");
           panel.admin = { ...hashPassword(b.password), username: b.username.trim() };
+        }
+        if (b.authProxy !== undefined) {
+          assert(typeof b.authProxy === "boolean", "Valeur d’authentification externe invalide", 400);
+          if (!authProxyManagedByEnv) panel.authProxy = b.authProxy;
         }
         panel.publicUrl = normalizePublicUrl(b.publicUrl);
         savePanel();
@@ -1022,6 +1042,8 @@ const server = http.createServer(async (req, res) => {
           adminManaged: adminFromEnv,
           loginDisabled: loginDisabled(),
           loginManaged: loginManagedByEnv,
+          authProxy: authProxyEnabled(),
+          authProxyManaged: authProxyManagedByEnv,
           adminAccounts: adminAccountIds,
           accounts: state.accounts.map(({ id, email, name }) => ({ id, email, name: name || email })),
           trackers: {
@@ -1070,6 +1092,14 @@ const server = http.createServer(async (req, res) => {
         panel.loginDisabled = b.disabled;
         savePanel();
         return json(res, { ok: true, loginDisabled: panel.loginDisabled });
+      }
+      if (route === "/api/settings/auth-proxy") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(!authProxyManagedByEnv, "L’authentification externe est gérée par l’environnement (AUTH_PROXY).", 409);
+        assert(typeof b.enabled === "boolean", "Valeur attendue", 400);
+        panel.authProxy = b.enabled;
+        savePanel();
+        return json(res, { ok: true, authProxy: authProxyEnabled() });
       }
       if (route === "/api/settings/tmdb") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
