@@ -2095,6 +2095,7 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .profile-color-swatches button.selected::after {content:"✓";position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-size:.9rem;font-weight:900;text-shadow:0 1px 3px #000,0 0 2px #000;}
 .auth-mode {display:grid;gap:8px;margin:0;padding:14px 18px;border:1px solid var(--border);border-radius:10px;min-width:0;}
 .auth-mode legend {padding:0 7px;color:var(--text-secondary);font-size:.875rem;}
+.auth-mode [hidden] {display:none;}
 .profile-avatar-fieldset {display:grid;gap:16px;margin:0;padding:18px;border:1px solid var(--border);border-radius:10px;min-width:0;}
 .profile-avatar-fieldset legend {padding:0 7px;color:var(--text-secondary);font-size:.875rem;}
 .profile-avatar-fieldset h3 {margin:0;font-size:.92rem;}
