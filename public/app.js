@@ -1208,15 +1208,18 @@ async function preview(data) {
     }
   };
 }
+// Addon logo from the manifest (shared by the library card and the multi-assign
+// list): the fetched logo image, with the first letter as a fallback.
+function addonLogoHtml(addon, extraClass = "") {
+  let source = "";
+  try {
+    const url = new URL(addon.logo);
+    if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) source = url.href;
+  } catch {}
+  return `<span class="addon-logo${extraClass ? " " + extraClass : ""}"><span>${esc((addon.name || "A").slice(0, 1).toUpperCase())}</span>${source ? `<img src="${esc(source)}" alt="${esc(t("Logo de {name}", { name: addon.name }))}" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
+}
 async function renderLibrary() {
-  const addonLogo = (addon) => {
-    let source = "";
-    try {
-      const url = new URL(addon.logo);
-      if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) source = url.href;
-    } catch {}
-    return `<span class="addon-logo"><span>${esc((addon.name || "A").slice(0, 1).toUpperCase())}</span>${source ? `<img src="${esc(source)}" alt="${esc(t("Logo de {name}", { name: addon.name }))}" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
-  };
+  const addonLogo = (addon) => addonLogoHtml(addon);
   // The avatars + profile count open a window to manage each profile's proxy mode
   // (no inline control); everything else on the card stays on a single row.
   const stack = (users) =>
@@ -1368,12 +1371,13 @@ async function bulkAssign() {
   const checklist = state.library
     .map(
       (a) =>
-        `<label class="check-label lib-pick"><input type="checkbox" value="${esc(a.id)}"><span class="addon-logo addon-logo-sm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${HOME_ICONS.puzzle}"></path></svg></span><span class="lib-pick-name">${esc(a.name)}</span></label>`,
+        `<label class="check-label lib-pick"><input type="checkbox" value="${esc(a.id)}">${addonLogoHtml(a, "addon-logo-sm")}<span class="lib-pick-name">${esc(a.name)}</span></label>`,
     )
     .join("");
   openDialog(
     `<h2>${esc(t("Attribuer plusieurs addons"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="bulk-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="bulk-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="bulk-mode">${modeOptions}</select></label><div class="lib-pick-head"><span class="muted">${esc(t("Addons à ajouter"))}</span><button type="button" id="bulk-all" class="quiet">${esc(t("Tout sélectionner"))}</button></div><div class="lib-picklist">${checklist}</div><p class="muted">${esc(t("Les addons déjà présents sur ce profil verront leur mode mis à jour."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="bulk-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
   );
+  $$("#dialog .lib-pick .addon-logo img").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
   $("#bulk-account").onchange = (e) =>
     run(async () => {
       $("#bulk-profile").innerHTML = profileOptions(
