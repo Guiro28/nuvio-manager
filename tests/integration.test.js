@@ -384,3 +384,98 @@ test("an existing administrator can securely migrate the public URL", async (t) 
   assert.equal((await request("login", { user: "existing-admin", password: "existing-password" })).status, 200);
   assert.equal(vault(folder).read("panel-settings").publicUrl, startup.base);
 });
+
+const freePort = async () => {
+  const probe = http.createServer();
+  probe.listen(0, "127.0.0.1");
+  await once(probe, "listening");
+  const port = probe.address().port;
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+};
+
+async function startManager(t, env) {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "nuvio-auth-proxy-"));
+  const child = spawn(process.execPath, ["server/index.js"], {
+    cwd: process.cwd(),
+    env: { ...process.env, PORT: "0", HOST: "127.0.0.1", DATA_DIR: folder, ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    child.kill();
+    await once(child, "exit");
+    fs.rmSync(folder, { recursive: true, force: true });
+  });
+  const base = await new Promise((resolve, reject) => {
+    let output = "";
+    const timer = setTimeout(() => reject(Error("Server startup timeout")), 10000);
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      const manager = output.match(/Nuvio Manager : http:\/\/localhost:(\d+)/);
+      if (manager) {
+        clearTimeout(timer);
+        resolve(`http://127.0.0.1:${manager[1]}`);
+      }
+    });
+    child.once("error", reject);
+  });
+  return { folder, base };
+}
+
+test("proxy d'auth externe : identité de confiance, origine déduite, cookie et relais public", async (t) => {
+  const relayPort = await freePort();
+  const { base } = await startManager(t, {
+    ADMIN_USERNAME: "admin",
+    ADMIN_PASSWORD: "test-password-env",
+    AUTH_PROXY: "true",
+    RELAY_PORT: String(relayPort),
+  });
+  const proxyHeaders = {
+    "X-Auth-Request-User": "alice@example.com",
+    "X-Forwarded-Host": "manager.example.com",
+    "X-Forwarded-Proto": "https",
+  };
+  // A trusted identity is accepted as admin without any local session.
+  const state = await fetch(base + "/api/state", { headers: proxyHeaders });
+  assert.equal(state.status, 200);
+  assert.equal((await state.json()).viewer.role, "admin");
+  // A POST origin is derived from X-Forwarded-* for trusted proxies.
+  const saved = await fetch(base + "/api/library/save", {
+    method: "POST",
+    headers: { ...proxyHeaders, "Content-Type": "application/json", Origin: "https://manager.example.com" },
+    body: JSON.stringify({ name: "Trusted addon", url: "https://example.invalid/addon" }),
+  });
+  assert.equal(saved.status, 200);
+  // Without the proxy identity, the manager falls back to its own login.
+  assert.equal((await fetch(base + "/api/state")).status, 401);
+  // Local login still works and sets a SameSite=Lax session cookie.
+  const login = await fetch(base + "/api/login", {
+    method: "POST",
+    headers: { ...proxyHeaders, "Content-Type": "application/json", Origin: "https://manager.example.com" },
+    body: JSON.stringify({ user: "admin", password: "test-password-env" }),
+  });
+  assert.equal(login.status, 200);
+  const cookieHeader = login.headers.get("set-cookie");
+  assert.match(cookieHeader, /nm_session=[a-f0-9]+/);
+  assert.match(cookieHeader, /SameSite=Lax/i);
+  // The dedicated relay listener serves the public relay without any auth.
+  const relay = await fetch(`http://127.0.0.1:${relayPort}/relay/direct/api/state`);
+  assert.equal(relay.status, 404);
+});
+
+test("proxy d'auth externe : en-têtes ignorés hors IP de confiance", async (t) => {
+  const { base } = await startManager(t, {
+    ADMIN_USERNAME: "admin",
+    ADMIN_PASSWORD: "test-password-env",
+    AUTH_PROXY: "true",
+    TRUST_PROXY_IPS: "203.0.113.1",
+  });
+  const state = await fetch(base + "/api/state", {
+    headers: {
+      "X-Auth-Request-User": "mallory@example.com",
+      "X-Forwarded-Host": "manager.example.com",
+      "X-Forwarded-Proto": "https",
+    },
+  });
+  assert.equal(state.status, 401);
+});

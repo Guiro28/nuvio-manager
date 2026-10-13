@@ -42,7 +42,8 @@ let state,
   historyTab = "progress",
   pairTimer,
   homeTimer,
-  perfTimer;
+  perfTimer,
+  loginDisabled = false;
 const labels = {
   home: "Accueil",
   profiles: "Comptes & profils",
@@ -109,10 +110,15 @@ async function api(route, data) {
     headers: { "X-Lang": getLang(), ...(data ? { "Content-Type": "application/json" } : {}) },
     ...(data ? { method: "POST", body: JSON.stringify(data) } : {}),
   });
-  const b = await r.json();
+  // A reverse proxy (e.g. an external OAuth portal) may replace the body with
+  // HTML on 401/403; never assume JSON or the real error is lost.
+  const contentType = r.headers.get("content-type") || "";
+  const b = contentType.includes("application/json") ? await r.json() : {};
   if (!r.ok) {
-    if (r.status === 401 && !route.startsWith("pair")) login();
+    if (r.status === 401 && !route.startsWith("pair") && !loginDisabled) login();
     if (r.status === 428 && route !== "setup") setup();
+    if (!b.error)
+      throw Error(t("Réponse inattendue du serveur ({status}).", { status: r.status }));
     throw Error(
       t(b.error) +
         (b.partial
@@ -1723,6 +1729,7 @@ run(async () => {
   const loading = $("#content");
   if (loading) loading.innerHTML = `<p>${esc(t("app.loading"))}</p>`;
   const initial = await api("setup");
+  loginDisabled = Boolean(initial.loginDisabled);
   if (initial.loginDisabled) {
     // External auth in front: no manager login screen, go straight in.
     const logout = $("#logout");

@@ -15,6 +15,7 @@ import {
   simklHistory,
 } from "./trackers.js";
 import http from "node:http";
+import { isIP } from "node:net";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
@@ -34,6 +35,125 @@ import { call, rpc, profile, profileList, backend, providerOf, PROVIDERS, iptvPl
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const host = process.env.HOST || "127.0.0.1",
   port = Number(process.env.PORT || 3100);
+
+// ── Reverse proxy / external auth (Traefik ForwardAuth + oauth2-proxy…) ─────
+// The manager can run behind a proxy that authenticates requests and injects an
+// identity header. Only requests arriving from a trusted proxy address are
+// believed, so X-Forwarded-* / X-Auth-Request-* cannot be spoofed from outside.
+//   TRUST_PROXY_IPS : comma-separated IPs/CIDRs allowed to set those headers
+//                     (default: loopback + private ranges, i.e. a Docker net).
+//   AUTH_PROXY      : trust the proxy identity header as the dashboard admin.
+//   SESSION_SAMESITE: Lax|Strict|None for the nm_session cookie (default Lax so
+//                     an OAuth redirect round-trip keeps the cookie).
+//   SESSION_DOMAIN  : optional Domain attribute for that cookie.
+//   RELAY_PORT      : optional second listener serving only the public /relay/**
+//                     addon proxy, exposable without the upstream auth proxy.
+const DEFAULT_TRUST_PROXY_IPS =
+  "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,fc00::/7,fe80::/10";
+const ipv4ToBytes = (ip) => {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(ip));
+  if (!m) return null;
+  const bytes = m.slice(1).map(Number);
+  return bytes.every((n) => n >= 0 && n <= 255) ? bytes : null;
+};
+const ipv6ToBytes = (ip) => {
+  let value = String(ip).toLowerCase();
+  const zone = value.indexOf("%");
+  if (zone !== -1) value = value.slice(0, zone);
+  const dotted = /(\d{1,3}(?:\.\d{1,3}){3})$/.exec(value);
+  if (dotted) {
+    const v4 = ipv4ToBytes(dotted[1]);
+    if (!v4) return null;
+    const high = ((v4[0] << 8) | v4[1]).toString(16);
+    const low = ((v4[2] << 8) | v4[3]).toString(16);
+    value = value.slice(0, value.length - dotted[1].length) + `${high}:${low}`;
+  }
+  const halves = value.split("::");
+  if (halves.length > 2) return null;
+  const groups = (part) => (part ? part.split(":") : []);
+  const head = groups(halves[0]);
+  const tail = halves.length === 2 ? groups(halves[1]) : [];
+  if ([...head, ...tail].some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0 || (halves.length === 1 && missing !== 0)) return null;
+  const full = [...head, ...Array(halves.length === 2 ? missing : 0).fill("0"), ...tail];
+  if (full.length !== 8) return null;
+  const bytes = [];
+  for (const g of full) {
+    const n = parseInt(g, 16);
+    bytes.push((n >> 8) & 255, n & 255);
+  }
+  return bytes;
+};
+const ipToBytes = (ip) => {
+  const str = String(ip);
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(str);
+  const candidate = mapped ? mapped[1] : str;
+  const family = isIP(candidate);
+  if (family === 4) return { family: 4, bytes: ipv4ToBytes(candidate) };
+  if (family === 6) return { family: 6, bytes: ipv6ToBytes(candidate) };
+  return { family: 0, bytes: null };
+};
+const parseTrustProxyIps = (value) =>
+  String(value || "")
+    .split(",")
+    .map((raw) => raw.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [addr, bitsRaw] = item.split("/");
+      const parsed = ipToBytes(addr);
+      if (!parsed.bytes) return null;
+      const max = parsed.family === 4 ? 32 : 128;
+      const bits = bitsRaw === undefined || bitsRaw === "" ? max : Number(bitsRaw);
+      if (!Number.isInteger(bits) || bits < 0 || bits > max) return null;
+      return { family: parsed.family, bytes: parsed.bytes, bits };
+    })
+    .filter(Boolean);
+const matchPrefix = (a, b, bits) => {
+  const fullBytes = bits >> 3;
+  for (let i = 0; i < fullBytes; i++) if (a[i] !== b[i]) return false;
+  const rem = bits & 7;
+  if (!rem) return true;
+  const mask = (0xff << (8 - rem)) & 0xff;
+  return (a[fullBytes] & mask) === (b[fullBytes] & mask);
+};
+const trustProxyIps = parseTrustProxyIps(
+  process.env.TRUST_PROXY_IPS !== undefined
+    ? process.env.TRUST_PROXY_IPS
+    : DEFAULT_TRUST_PROXY_IPS,
+);
+const isTrustedProxy = (req) => {
+  const parsed = ipToBytes(req.socket?.remoteAddress || "");
+  if (!parsed.bytes) return false;
+  return trustProxyIps.some(
+    (entry) =>
+      entry.family === parsed.family &&
+      matchPrefix(parsed.bytes, entry.bytes, entry.bits),
+  );
+};
+const proxyIdentity = (req) =>
+  String(
+    req.headers["x-auth-request-user"] ||
+      req.headers["x-auth-request-email"] ||
+      req.headers["x-forwarded-user"] ||
+      "",
+  ).trim();
+const authProxyEnabled = () =>
+  /^(1|true|yes|on)$/i.test(String(process.env.AUTH_PROXY || ""));
+// Deriving the public origin from X-Forwarded-* is only safe when the operator
+// explicitly declared a reverse proxy (either a trust list or AUTH_PROXY);
+// otherwise the secure default (PUBLIC_URL, else localhost) is kept.
+const forwardedHeadersTrusted = () =>
+  process.env.TRUST_PROXY_IPS !== undefined || authProxyEnabled();
+const SESSION_SAMESITE = (() => {
+  const value = String(process.env.SESSION_SAMESITE || "lax").toLowerCase();
+  if (!["lax", "strict", "none"].includes(value)) {
+    console.error(`SESSION_SAMESITE ignoré (valeur invalide) : ${value}`);
+    return "Lax";
+  }
+  return value[0].toUpperCase() + value.slice(1);
+})();
+const SESSION_DOMAIN = String(process.env.SESSION_DOMAIN || "").trim();
 
 const db = vault(process.env.DATA_DIR || path.join(root, "data"));
 
@@ -96,6 +216,44 @@ function normalizePublicUrl(value) {
   return url.origin;
 }
 const publicOrigin = () => panel.publicUrl || `http://localhost:${port}`;
+// Public origin for a specific request. PUBLIC_URL always wins; otherwise, when
+// the request comes from a trusted reverse proxy, it's derived from the
+// X-Forwarded-* headers so the host/origin guards work without PUBLIC_URL.
+function originFor(req) {
+  if (panel.publicUrl) return panel.publicUrl;
+  if (req && forwardedHeadersTrusted() && isTrustedProxy(req)) {
+    const proto = String(req.headers["x-forwarded-proto"] || "")
+      .split(",")[0]
+      .trim()
+      .toLowerCase();
+    const fwdHost = String(req.headers["x-forwarded-host"] || "")
+      .split(",")[0]
+      .trim();
+    const reqHost = String(req.headers.host || "").trim();
+    const hostValue = fwdHost || reqHost;
+    if ((proto === "http" || proto === "https") && hostValue) {
+      try {
+        return new URL(`${proto}://${hostValue}`).origin;
+      } catch {
+        /* fall through to localhost */
+      }
+    }
+  }
+  return `http://localhost:${port}`;
+}
+const secureFor = (req) => originFor(req).startsWith("https:");
+function sessionCookie(req, sid, maxAge) {
+  const parts = [
+    `nm_session=${sid}`,
+    "HttpOnly",
+    `SameSite=${SESSION_SAMESITE}`,
+    "Path=/",
+    `Max-Age=${maxAge}`,
+  ];
+  if (SESSION_DOMAIN) parts.push(`Domain=${SESSION_DOMAIN}`);
+  if (SESSION_SAMESITE === "None" || secureFor(req)) parts.push("Secure");
+  return parts.join("; ");
+}
 const effectiveProxyUrl = () => panel.proxyUrl !== undefined
   ? panel.proxyUrl
   : "";
@@ -110,14 +268,11 @@ const saveSessions = () =>
     version: 1,
     entries: Object.fromEntries(sessions),
   });
-const issueSession = (res, role = "admin", account = null) => {
+const issueSession = (res, req, role = "admin", account = null) => {
   const sid = crypto.randomBytes(32).toString("hex");
   sessions.set(sid, { exp: Date.now() + 8 * 3600 * 1000, role, account });
   saveSessions();
-  res.setHeader(
-    "Set-Cookie",
-    `nm_session=${sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${publicOrigin().startsWith("https:") ? "; Secure" : ""}`,
-  );
+  res.setHeader("Set-Cookie", sessionCookie(req, sid, 28800));
   return sid;
 };
 const equal = (a, b) => {
@@ -663,7 +818,7 @@ const server = http.createServer(async (req, res) => {
           415,
         );
         const allowed = new Set([
-          publicOrigin(),
+          originFor(req),
           `http://localhost:${port}`,
           `http://127.0.0.1:${port}`,
         ]);
@@ -682,9 +837,10 @@ const server = http.createServer(async (req, res) => {
           403,
         );
       }
-      // PUBLIC_URL's own host is the trusted host; localhost covers direct access.
+      // The request's public host (PUBLIC_URL, or X-Forwarded-Host via a trusted
+      // proxy) is trusted; localhost covers direct access.
       const allowedHosts = new Set([
-        new URL(publicOrigin()).host.toLowerCase(),
+        new URL(originFor(req)).host.toLowerCase(),
         `localhost:${port}`,
         `127.0.0.1:${port}`,
       ]);
@@ -715,7 +871,7 @@ const server = http.createServer(async (req, res) => {
         }
         panel.publicUrl = normalizePublicUrl(b.publicUrl);
         savePanel();
-        if (createAdmin) issueSession(res);
+        if (createAdmin) issueSession(res, req);
         return json(res, { ok: true, requiresLogin: !createAdmin });
       }
       if (url.pathname === "/api/login") {
@@ -731,7 +887,7 @@ const server = http.createServer(async (req, res) => {
           "Identifiants incorrects",
           401,
         );
-        issueSession(res, "admin");
+        issueSession(res, req, "admin");
         return json(res, { ok: true });
       }
       if (url.pathname === "/api/login/nuvio") {
@@ -782,7 +938,7 @@ const server = http.createServer(async (req, res) => {
           acc.expires = Date.now() + (Number(data.expires_in) || 3600) * 1000;
           save();
         }
-        issueSession(res, "nuvio", acc.id);
+        issueSession(res, req, "nuvio", acc.id);
         return json(res, { ok: true });
       }
       const sid = req.headers.cookie?.match(
@@ -793,11 +949,16 @@ const server = http.createServer(async (req, res) => {
         sessions.delete(sid);
         saveSessions();
       }
-      if (!loginDisabled()) {
+      // Hybrid auth: when the request carries an identity from a trusted auth
+      // proxy, it is the admin without a local session (no double login). Any
+      // other request falls back to the manager's own session/login.
+      const proxyAdmin =
+        authProxyEnabled() && isTrustedProxy(req) && Boolean(proxyIdentity(req));
+      if (!loginDisabled() && !proxyAdmin) {
         assert(!setupRequired(), "Configuration initiale requise", 428);
         assert(authEnabled() && session && session.exp > Date.now(), "Connexion au dashboard requise", 401);
       }
-      const viewer = (!loginDisabled() && session?.role === "nuvio")
+      const viewer = (!loginDisabled() && !proxyAdmin && session?.role === "nuvio")
         ? { role: "nuvio", account: session.account }
         : { role: "admin", account: null };
       const uiLang = requestLang(req);
@@ -965,7 +1126,7 @@ const server = http.createServer(async (req, res) => {
         const next = {...panel,admin:{salt:record.salt,hash:record.hash,username:b.username.trim()}};
         db.write("panel-settings",next); Object.assign(panel,next);
         sessions.clear();
-        issueSession(res);
+        issueSession(res, req);
         return json(res,{ok:true});
       }
       if (route === "/api/settings/trackers") {
@@ -1009,10 +1170,7 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/logout") {
         sessions.delete(sid);
         saveSessions();
-        res.setHeader(
-          "Set-Cookie",
-          "nm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        );
+        res.setHeader("Set-Cookie", sessionCookie(req, "", 0));
         return json(res, { ok: true });
       }
       if (route === "/api/pair/start") {
@@ -1948,6 +2106,10 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(port, host, () => {
   console.log(`Nuvio Manager : http://localhost:${server.address().port}`);
+  if (authProxyEnabled())
+    console.log(
+      "Authentification par proxy externe activée (AUTH_PROXY) : identité X-Auth-Request-* / X-Forwarded-User de confiance.",
+    );
   // Start the background history mirror (initial fill + periodic refresh).
   if (!setupRequired()) historyStore.start();
   if (setupRequired()) {
@@ -1961,3 +2123,29 @@ server.listen(port, host, () => {
     console.log("Adresse publique à configurer dans les paramètres (ou via PUBLIC_URL).");
   }
 });
+
+// Optional second listener that serves ONLY the public addon relay (/relay/**).
+// It lets operators expose the relay on a host/port that is not behind the
+// external auth proxy, when exempting "/relay" per-path (Traefik
+// --skip-auth-route / a dedicated router) is not possible. The main listener
+// keeps serving the relay too, so this is purely additive.
+const relayPort = Number(process.env.RELAY_PORT || 0);
+if (Number.isInteger(relayPort) && relayPort > 0) {
+  const relayServer = http.createServer(async (req, res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    try {
+      const url = new URL(req.url, "http://localhost");
+      if (await addonProxy.handle(req, res, url)) return;
+      res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "Route inconnue" }));
+    } catch (e) {
+      if (!res.headersSent) {
+        res.writeHead(e.status || 502, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: e.message }));
+      } else res.destroy();
+    }
+  });
+  relayServer.listen(relayPort, host, () => {
+    console.log(`Relais d'addons public : http://localhost:${relayServer.address().port}`);
+  });
+}
