@@ -664,10 +664,10 @@ export async function renderStatistics(container, { api, run, openDialog }) {
         <div class="stats-profile-detail-avatar stats-addon-detail-logo">${logo ? `<img src="${esc(logo)}" alt="" referrerpolicy="no-referrer">` : '<span aria-hidden="true">⊞</span>'}</div>
         <div><p class="stats-detail-kicker">${esc(t("Addon"))}</p><h2>${esc(addon.name)}</h2><p>${esc(t("{opens} flux ouverts · {profiles} profil(s)", { opens: addon.opens, profiles: addon.profiles }))}</p></div>
       </header>
-      ${rows.length ? `<section class="stats-detail-list stats-addon-breakdown"><h3>${esc(t("Flux ouverts par profil"))}</h3>${rows.map((row) => {
+      ${rows.length ? `<section class="stats-addon-tiles"><h3>${esc(t("Flux ouverts par profil"))}</h3><div class="stats-addon-tile-grid">${rows.map((row) => {
         const avatar = safeImageUrl(row.avatarUrl);
-        return `<div class="stats-addon-row"><span class="stats-addon-profile">${avatar ? `<img class="stats-addon-avatar" src="${esc(avatar)}" alt="" referrerpolicy="no-referrer">` : '<span class="stats-addon-avatar" aria-hidden="true">●</span>'}<span class="stats-addon-profile-meta"><strong>${esc(row.profileName)}</strong><small>${esc(row.accountName)}${row.modes?.length ? " · " + row.modes.map(addonModeLabel).map(esc).join(", ") : ""}</small></span></span><strong>${row.opens}</strong></div>`;
-      }).join("")}</section>` : `<p class="stats-card-empty">${esc(t("Aucun flux relayé. Seuls les addons proxifiés sont comptés."))}</p>`}
+        return `<div class="stats-addon-tile" title="${esc(row.accountName)}${row.modes?.length ? " · " + row.modes.map(addonModeLabel).map(esc).join(", ") : ""}"><span class="stats-addon-tile-avatar">${avatar ? `<img src="${esc(avatar)}" alt="" referrerpolicy="no-referrer">` : '<span aria-hidden="true">●</span>'}</span><strong class="stats-addon-tile-name">${esc(row.profileName)}</strong><span class="stats-addon-tile-count">${row.opens}</span><small class="stats-addon-tile-sub">${esc(row.accountName)}</small></div>`;
+      }).join("")}</div></section>` : `<p class="stats-card-empty">${esc(t("Aucun flux relayé. Seuls les addons proxifiés sont comptés."))}</p>`}
       <div class="dialog-actions"><button type="button" data-close>${esc(t("Fermer"))}</button></div>
     </article>`);
   };

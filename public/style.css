@@ -2124,15 +2124,18 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .stats-detail-list>div {display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.77rem;}
 .stats-detail-list>div strong {text-align:right;}
 .stats-detail-modal .dialog-actions a {display:inline-flex;align-items:center;padding:9px 14px;border:1px solid var(--border-strong);border-radius:8px;background:var(--button);color:var(--ink);font-size:.875rem;font-weight:550;text-decoration:none;}
-/* Addon detail dialog: per-profile stream-open breakdown */
+/* Addon detail dialog: per-profile stream-open breakdown (tuiles) */
 .stats-addon-detail-logo {overflow:hidden;background:var(--button);}
 .stats-addon-detail-logo img {width:100%;height:100%;object-fit:contain;}
-.stats-addon-breakdown>div {align-items:center;}
-.stats-addon-profile {display:flex;align-items:center;gap:10px;min-width:0;}
-.stats-addon-avatar {flex:0 0 30px;width:30px;height:30px;border-radius:50%;object-fit:cover;display:grid;place-items:center;background:var(--selected);color:var(--selected-ink);font-size:.8rem;}
-.stats-addon-profile-meta {display:flex;flex-direction:column;min-width:0;}
-.stats-addon-profile-meta strong {font-size:.85rem;}
-.stats-addon-profile-meta small {color:var(--text-muted);}
+.stats-addon-tiles {margin-top:18px;border-top:1px solid var(--border);padding-top:13px;}
+.stats-addon-tiles h3 {margin:0 0 12px;font-size:.85rem;}
+.stats-addon-tile-grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:12px;}
+.stats-addon-tile {display:flex;flex-direction:column;align-items:center;text-align:center;gap:5px;padding:14px 8px;border:1px solid var(--border);border-radius:12px;background:var(--surface);min-width:0;}
+.stats-addon-tile-avatar {width:46px;height:46px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:var(--selected);color:var(--selected-ink);font-size:1rem;}
+.stats-addon-tile-avatar img {width:100%;height:100%;object-fit:cover;}
+.stats-addon-tile-name {font-size:.85rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.stats-addon-tile-count {font-size:1.3rem;font-weight:700;line-height:1;}
+.stats-addon-tile-sub {color:var(--text-muted);font-size:.72rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* Clickable timeline day + its day-detail dialog */
 .timeline-day-clickable {cursor:pointer;}
 .stats-day-header {padding-bottom:16px;border-bottom:1px solid var(--border);}
