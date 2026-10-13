@@ -12,6 +12,11 @@ services:
       # ADMIN_PASSWORD: change-moi-12-caracteres-minimum
       # PUBLIC_URL: https://manager.example.com    # Adresse publique HTTPS du dashboard.
       # DISABLE_LOGIN: "true"                      # Désactiver la page de connexion du manager (UNIQUEMENT derrière une authentification externe type OAuth : sinon l'accès est ouvert en admin).
+      # AUTH_PROXY: "true"                         # Faire confiance à l'identité injectée par un proxy d'auth (X-Auth-Request-User/X-Forwarded-User). Voir docs/oauth2-proxy.md.
+      # TRUST_PROXY_IPS: "172.16.0.0/12"           # IPs/CIDR autorisés à poser les en-têtes X-Forwarded-*/X-Auth-Request-* (défaut : boucle locale + réseau privé).
+      # SESSION_SAMESITE: lax                      # lax (défaut) | strict | none — attribut SameSite du cookie de session.
+      # SESSION_DOMAIN: .example.com               # Domaine optionnel du cookie de session.
+      # RELAY_PORT: "3101"                         # Écouteur additionnel servant uniquement le relais public /relay/** (hors proxy d'auth).
     volumes:
       - manager-data:/app/data
   warp:
