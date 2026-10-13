@@ -1481,7 +1481,7 @@ const server = http.createServer(async (req, res) => {
             .filter(Boolean),
         )].sort();
         const statsAccounts = isAdmin ? state.accounts : state.accounts.filter((a) => a.id === viewer.account);
-        const cacheKey = `stats-v8:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
+        const cacheKey = `stats-v9:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
         const cached = statisticsCache.get(cacheKey);
         if (!url.searchParams.has("refresh") && cached?.expiresAt > Date.now())
           return json(res, cached.value);
@@ -1516,6 +1516,39 @@ const server = http.createServer(async (req, res) => {
           : dataset;
         const result = summarizeStatistics(selected, days);
         result.availableProfiles = availableProfiles;
+        // "Addons les plus actifs": stream opens relayed by the proxy, aggregated
+        // per addon and filtered by the same period + selected profiles. Only
+        // proxied addons are visible (a "sans proxy" install bypasses the relay).
+        {
+          const sinceMs = days ? Date.now() - days * 86400000 : 0;
+          const refSet = requestedProfiles.length ? new Set(requestedProfiles) : null;
+          const accountSet = new Set(statsAccounts.map((a) => a.id));
+          const agg = new Map();
+          for (const event of addonProxy.openEvents()) {
+            if (event.at < sinceMs || !accountSet.has(event.accountId)) continue;
+            if (refSet && !refSet.has(`${event.accountId}:${event.profileId}`)) continue;
+            const key = addonManifestKey(event.manifest);
+            const entry = agg.get(key) || { opens: 0, profiles: new Set(), modes: new Set() };
+            entry.opens++;
+            entry.profiles.add(`${event.accountId}:${event.profileId}`);
+            entry.modes.add(event.mode);
+            agg.set(key, entry);
+          }
+          result.addons = [...agg.entries()]
+            .map(([key, entry]) => {
+              const lib = state.library.find((item) => addonManifestKey(item.url) === key);
+              return {
+                key,
+                name: lib?.name || key,
+                logo: lib?.logo || "",
+                opens: entry.opens,
+                profiles: entry.profiles.size,
+                modes: [...entry.modes],
+              };
+            })
+            .sort((a, b) => b.opens - a.opens)
+            .slice(0, 5);
+        }
         const rankedItems = Object.values(result.rankings || {}).flat();
         const timelineItems = (result.timeline || []).flatMap((day) => day.items || []);
         const metadataItems = [

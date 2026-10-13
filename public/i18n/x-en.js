@@ -1403,4 +1403,8 @@ export default {
   "Gérer les profils": "Manage profiles",
   "Profils utilisant « {name} »": "Profiles using “{name}”",
   "Choisissez le mode de proxy de chaque profil. Une confirmation s’affiche avant l’enregistrement.": "Choose the proxy mode for each profile. A confirmation appears before saving.",
+  "Addons les plus actifs": "Most active addons",
+  "Flux ouverts": "Streams opened",
+  "Aucun flux relayé. Seuls les addons proxifiés sont comptés.": "No streams relayed yet. Only proxied addons are counted.",
+  "{opens} flux · {profiles} profil(s)": "{opens} streams · {profiles} profile(s)",
 };

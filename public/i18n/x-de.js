@@ -1388,4 +1388,8 @@ export default {
   "Gérer les profils": "Profile verwalten",
   "Profils utilisant « {name} »": "Profile, die „{name}“ verwenden",
   "Choisissez le mode de proxy de chaque profil. Une confirmation s’affiche avant l’enregistrement.": "Wähle den Proxy-Modus für jedes Profil. Vor dem Speichern erscheint eine Bestätigung.",
+  "Addons les plus actifs": "Aktivste Addons",
+  "Flux ouverts": "Geöffnete Streams",
+  "Aucun flux relayé. Seuls les addons proxifiés sont comptés.": "Noch keine Streams weitergeleitet. Nur proxyfizierte Addons werden gezählt.",
+  "{opens} flux · {profiles} profil(s)": "{opens} Streams · {profiles} Profil(e)",
 };

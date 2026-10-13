@@ -352,7 +352,7 @@ export async function renderStatistics(container, { api, run, openDialog }) {
         ${rankingCard(t("Séries les plus populaires"), rankings.popularSeries, t("Profils"), "profiles")}
         ${rankingCard(t("Films les plus regardés"), rankings.watchedMovies, t("Lectures"), "plays")}
         ${rankingCard(t("Films les plus populaires"), rankings.popularMovies, t("Profils"), "profiles")}
-        ${sourceCard(data.sources || [])}
+        ${addonCard(data.addons || [])}
         ${profileRankingCard(activeProfiles)}
       </section>
       ${recentShelf(recentItems.slice(0, 20))}
@@ -389,6 +389,19 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       const logo = sourceLogo(source.source), label = sourceLabel(source.source);
       return `<li tabindex="0" data-preview-poster="${esc(logo)}" data-preview-backdrop="${esc(logo)}" data-preview-title="${esc(label)}" title="${t("{movies} films · {series} épisodes · {profiles} profil(s)", { movies: source.movies, series: source.series, profiles: source.profiles })}"><b>${index + 1}</b><span>${esc(label)}</span><strong>${source.plays}</strong></li>`;
     }).join("")}</ol></div>` : `<p class="stats-card-empty">${esc(t("Aucune source active."))}</p>`}</div></article>`;
+  };
+  // Most active proxied addons: stream opens relayed per addon (same card layout
+  // as the sources ranking). Only proxied addons are tracked.
+  const addonCard = (addons) => {
+    const first = addons[0], firstLogo = first?.logo || "";
+    const background = firstLogo ? `<img class="stats-card-bg" src="${esc(firstLogo)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : "";
+    const lead = firstLogo
+      ? `<img class="stats-lead-image stats-source-logo" src="${esc(firstLogo)}" alt="${esc(t("Logo de {name}", { name: first.name }))}" loading="lazy" referrerpolicy="no-referrer">`
+      : '<span class="stats-lead-image stats-source-logo" aria-hidden="true">⊞</span>';
+    return `<article class="stats-ranking-card stats-preview-card stats-source-preview" data-default-poster="${esc(firstLogo)}" data-default-backdrop="${esc(firstLogo)}" data-default-title="${esc(first?.name || "")}">${background}<div class="stats-card-content"><header><h2>${esc(t("Addons les plus actifs"))}</h2><small>${esc(t("Flux ouverts"))}</small></header>${addons.length ? `<div class="stats-ranking-body">${lead}<ol>${addons.slice(0, 5).map((addon, index) => {
+      const logo = addon.logo || "";
+      return `<li tabindex="0" ${logo ? `data-preview-poster="${esc(logo)}" data-preview-backdrop="${esc(logo)}"` : ""} data-preview-title="${esc(addon.name)}" title="${esc(t("{opens} flux · {profiles} profil(s)", { opens: addon.opens, profiles: addon.profiles }))}"><b>${index + 1}</b><span>${esc(addon.name)}</span><strong>${addon.opens}</strong></li>`;
+    }).join("")}</ol></div>` : `<p class="stats-card-empty">${esc(t("Aucun flux relayé. Seuls les addons proxifiés sont comptés."))}</p>`}</div></article>`;
   };
   const recentShelf = (items) => {
     const first = items[0];

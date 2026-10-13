@@ -1388,4 +1388,8 @@ export default {
   "Gérer les profils": "Gestisci profili",
   "Profils utilisant « {name} »": "Profili che usano «{name}»",
   "Choisissez le mode de proxy de chaque profil. Une confirmation s’affiche avant l’enregistrement.": "Scegli la modalità di proxy di ogni profilo. Prima del salvataggio appare una conferma.",
+  "Addons les plus actifs": "Addon più attivi",
+  "Flux ouverts": "Flussi aperti",
+  "Aucun flux relayé. Seuls les addons proxifiés sont comptés.": "Nessun flusso instradato. Vengono conteggiati solo gli addon con proxy.",
+  "{opens} flux · {profiles} profil(s)": "{opens} flussi · {profiles} profilo/i",
 };

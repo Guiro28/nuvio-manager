@@ -111,6 +111,51 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
   };
   const metrics = () => ({ direct: state.bandwidth.direct, warp: state.bandwidth.warp });
 
+  // Per-addon "stream opens": one event each time a NEW /play token is first
+  // requested (its grant carries the addon id). A single playback reuses one token
+  // for all its range requests, so buffering / seeking / resuming count once; a
+  // genuinely new launch re-generates the stream list and mints a fresh token.
+  if (!Array.isArray(state.addonOpens)) {
+    state.addonOpens = [];
+    save();
+  }
+  // ~13 months keeps every stats period in range without unbounded growth.
+  const OPENS_RETENTION_MS = 400 * 24 * 3600 * 1000;
+  const OPENS_MAX = 50000;
+  // De-dup within a token's lifetime (same as the /play TTL): a token already
+  // counted is ignored until it expires. In-memory only (a restart may recount a
+  // playback once — negligible). Hashed so raw tokens are never kept.
+  const DEDUP_MS = (() => {
+    const h = Number(process.env.PLAY_TTL_HOURS ?? 12);
+    return (Number.isFinite(h) && h > 0 ? h : 12) * 3600 * 1000;
+  })();
+  const seenPlayTokens = new Map(); // tokenHash -> expiresAt
+  const isNewOpen = (token) => {
+    const now = Date.now();
+    if (seenPlayTokens.size > 10000)
+      for (const [k, exp] of seenPlayTokens) if (exp <= now) seenPlayTokens.delete(k);
+    const hash = crypto.createHash("sha256").update(String(token)).digest("hex").slice(0, 32);
+    const exp = seenPlayTokens.get(hash);
+    if (exp && exp > now) return false;
+    seenPlayTokens.set(hash, now + DEDUP_MS);
+    return true;
+  };
+  const recordOpen = (grant, mode) => {
+    if (!grant || !grant.manifestUrl || grant.accountId == null) return;
+    state.addonOpens.push({
+      at: Date.now(),
+      accountId: grant.accountId,
+      profileId: grant.profileId ?? null,
+      manifest: grant.manifestUrl,
+      mode,
+    });
+    const cutoff = Date.now() - OPENS_RETENTION_MS;
+    if (state.addonOpens.length > OPENS_MAX || (state.addonOpens[0] && state.addonOpens[0].at < cutoff))
+      state.addonOpens = state.addonOpens.filter((e) => e.at >= cutoff).slice(-OPENS_MAX);
+    save();
+  };
+  const openEvents = () => state.addonOpens;
+
   // Resolve a relay token to its grant (new) or legacy addon. Revoked grants are
   // returned too (callers decide): the relay refuses them, but clone/describe
   // still need their manifestUrl, which is why grants are soft-deleted.
@@ -301,7 +346,13 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     try {
       const upstream = upstreamFor(mode, configuredProxy());
       if (match[2] === "play") {
-        const decoded = decodeToken(url.searchParams.get("t"));
+        const rawToken = url.searchParams.get("t");
+        const decoded = decodeToken(rawToken);
+        // Count a stream open once per fresh token (ignores range/buffer/seek).
+        if (req.method === "GET" && decoded.addonId && isNewOpen(rawToken)) {
+          const grant = getGrant(decoded.addonId);
+          if (grant) recordOpen(grant, mode);
+        }
         const headers = { ...decoded.headers };
         if (req.headers.range) headers.range = req.headers.range;
         headers["user-agent"] ||= req.headers["user-agent"] || "Mozilla/5.0";
@@ -375,5 +426,5 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     }
   }
 
-  return { handle, register, status, test, metrics, describe, revokeAccount, reconcile };
+  return { handle, register, status, test, metrics, openEvents, describe, revokeAccount, reconcile };
 }
