@@ -1392,4 +1392,8 @@ export default {
   "Flux ouverts": "Flujos abiertos",
   "Aucun flux relayé. Seuls les addons proxifiés sont comptés.": "Ningún flujo retransmitido. Solo se cuentan los addons con proxy.",
   "{opens} flux · {profiles} profil(s)": "{opens} flujos · {profiles} perfil(es)",
+  "Détail par profil de {name}": "Detalle por perfil de {name}",
+  "Addon": "Addon",
+  "{opens} flux ouverts · {profiles} profil(s)": "{opens} flujos abiertos · {profiles} perfil(es)",
+  "Flux ouverts par profil": "Flujos abiertos por perfil",
 };

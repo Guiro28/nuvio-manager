@@ -1392,4 +1392,8 @@ export default {
   "Flux ouverts": "Geöffnete Streams",
   "Aucun flux relayé. Seuls les addons proxifiés sont comptés.": "Noch keine Streams weitergeleitet. Nur proxyfizierte Addons werden gezählt.",
   "{opens} flux · {profiles} profil(s)": "{opens} Streams · {profiles} Profil(e)",
+  "Détail par profil de {name}": "Aufschlüsselung nach Profil von {name}",
+  "Addon": "Addon",
+  "{opens} flux ouverts · {profiles} profil(s)": "{opens} geöffnete Streams · {profiles} Profil(e)",
+  "Flux ouverts par profil": "Geöffnete Streams pro Profil",
 };

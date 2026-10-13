@@ -400,7 +400,7 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       : '<span class="stats-lead-image stats-source-logo" aria-hidden="true">⊞</span>';
     return `<article class="stats-ranking-card stats-preview-card stats-source-preview" data-default-poster="${esc(firstLogo)}" data-default-backdrop="${esc(firstLogo)}" data-default-title="${esc(first?.name || "")}">${background}<div class="stats-card-content"><header><h2>${esc(t("Addons les plus actifs"))}</h2><small>${esc(t("Flux ouverts"))}</small></header>${addons.length ? `<div class="stats-ranking-body">${lead}<ol>${addons.slice(0, 5).map((addon, index) => {
       const logo = addon.logo || "";
-      return `<li tabindex="0" ${logo ? `data-preview-poster="${esc(logo)}" data-preview-backdrop="${esc(logo)}"` : ""} data-preview-title="${esc(addon.name)}" title="${esc(t("{opens} flux · {profiles} profil(s)", { opens: addon.opens, profiles: addon.profiles }))}"><b>${index + 1}</b><span>${esc(addon.name)}</span><strong>${addon.opens}</strong></li>`;
+      return `<li tabindex="0" role="button" data-addon-key="${esc(addon.key)}" aria-label="${esc(t("Détail par profil de {name}", { name: addon.name }))}" ${logo ? `data-preview-poster="${esc(logo)}" data-preview-backdrop="${esc(logo)}"` : ""} data-preview-title="${esc(addon.name)}" title="${esc(t("{opens} flux · {profiles} profil(s)", { opens: addon.opens, profiles: addon.profiles }))}"><b>${index + 1}</b><span>${esc(addon.name)}</span><strong>${addon.opens}</strong></li>`;
     }).join("")}</ol></div>` : `<p class="stats-card-empty">${esc(t("Aucun flux relayé. Seuls les addons proxifiés sont comptés."))}</p>`}</div></article>`;
   };
   const recentShelf = (items) => {
@@ -654,6 +654,23 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       <div class="dialog-actions"><button type="button" data-close>${esc(t("Fermer"))}</button></div>
     </article>`);
   };
+  const addonModeLabel = (mode) =>
+    ({ none: t("Sans proxy"), direct: t("Proxy interne"), warp: t("Proxy externe") })[mode] || mode;
+  const showAddonDetail = (addon) => {
+    const logo = safeImageUrl(addon.logo);
+    const rows = addon.breakdown || [];
+    openDialog?.(`<article class="stats-detail-modal stats-addon-modal">
+      <header class="stats-profile-detail-header">
+        <div class="stats-profile-detail-avatar stats-addon-detail-logo">${logo ? `<img src="${esc(logo)}" alt="" referrerpolicy="no-referrer">` : '<span aria-hidden="true">⊞</span>'}</div>
+        <div><p class="stats-detail-kicker">${esc(t("Addon"))}</p><h2>${esc(addon.name)}</h2><p>${esc(t("{opens} flux ouverts · {profiles} profil(s)", { opens: addon.opens, profiles: addon.profiles }))}</p></div>
+      </header>
+      ${rows.length ? `<section class="stats-detail-list stats-addon-breakdown"><h3>${esc(t("Flux ouverts par profil"))}</h3>${rows.map((row) => {
+        const avatar = safeImageUrl(row.avatarUrl);
+        return `<div class="stats-addon-row"><span class="stats-addon-profile">${avatar ? `<img class="stats-addon-avatar" src="${esc(avatar)}" alt="" referrerpolicy="no-referrer">` : '<span class="stats-addon-avatar" aria-hidden="true">●</span>'}<span class="stats-addon-profile-meta"><strong>${esc(row.profileName)}</strong><small>${esc(row.accountName)}${row.modes?.length ? " · " + row.modes.map(addonModeLabel).map(esc).join(", ") : ""}</small></span></span><strong>${row.opens}</strong></div>`;
+      }).join("")}</section>` : `<p class="stats-card-empty">${esc(t("Aucun flux relayé. Seuls les addons proxifiés sont comptés."))}</p>`}
+      <div class="dialog-actions"><button type="button" data-close>${esc(t("Fermer"))}</button></div>
+    </article>`);
+  };
   const bindDetailTriggers = () => {
     const bind = (element, action) => {
       element.addEventListener("click", action);
@@ -670,6 +687,10 @@ export async function renderStatistics(container, { api, run, openDialog }) {
     container.querySelectorAll("[data-stats-profile]").forEach((element) => bind(element, () => {
       const profile = profileDetails.get(element.dataset.statsProfile);
       if (profile) showProfileDetail(profile);
+    }));
+    container.querySelectorAll("[data-addon-key]").forEach((element) => bind(element, () => {
+      const addon = (currentData?.addons || []).find((item) => item.key === element.dataset.addonKey);
+      if (addon) showAddonDetail(addon);
     }));
   };
   const timelineChart = (items, availableWidth = 900) => {

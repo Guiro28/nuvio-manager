@@ -1392,4 +1392,8 @@ export default {
   "Flux ouverts": "Flussi aperti",
   "Aucun flux relayé. Seuls les addons proxifiés sont comptés.": "Nessun flusso instradato. Vengono conteggiati solo gli addon con proxy.",
   "{opens} flux · {profiles} profil(s)": "{opens} flussi · {profiles} profilo/i",
+  "Détail par profil de {name}": "Dettaglio per profilo di {name}",
+  "Addon": "Addon",
+  "{opens} flux ouverts · {profiles} profil(s)": "{opens} flussi aperti · {profiles} profilo/i",
+  "Flux ouverts par profil": "Flussi aperti per profilo",
 };

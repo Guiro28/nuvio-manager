@@ -1481,7 +1481,7 @@ const server = http.createServer(async (req, res) => {
             .filter(Boolean),
         )].sort();
         const statsAccounts = isAdmin ? state.accounts : state.accounts.filter((a) => a.id === viewer.account);
-        const cacheKey = `stats-v9:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
+        const cacheKey = `stats-v10:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
         const cached = statisticsCache.get(cacheKey);
         if (!url.searchParams.has("refresh") && cached?.expiresAt > Date.now())
           return json(res, cached.value);
@@ -1523,20 +1523,41 @@ const server = http.createServer(async (req, res) => {
           const sinceMs = days ? Date.now() - days * 86400000 : 0;
           const refSet = requestedProfiles.length ? new Set(requestedProfiles) : null;
           const accountSet = new Set(statsAccounts.map((a) => a.id));
+          const refInfo = new Map(
+            dataset.map((p) => [p.ref, { profileName: p.profileName, accountName: p.accountName, avatarUrl: p.avatarUrl || "" }]),
+          );
           const agg = new Map();
           for (const event of addonProxy.openEvents()) {
             if (event.at < sinceMs || !accountSet.has(event.accountId)) continue;
-            if (refSet && !refSet.has(`${event.accountId}:${event.profileId}`)) continue;
+            const ref = `${event.accountId}:${event.profileId}`;
+            if (refSet && !refSet.has(ref)) continue;
             const key = addonManifestKey(event.manifest);
-            const entry = agg.get(key) || { opens: 0, profiles: new Set(), modes: new Set() };
+            const entry = agg.get(key) || { opens: 0, profiles: new Set(), modes: new Set(), byRef: new Map() };
             entry.opens++;
-            entry.profiles.add(`${event.accountId}:${event.profileId}`);
+            entry.profiles.add(ref);
             entry.modes.add(event.mode);
+            const perProfile = entry.byRef.get(ref) || { opens: 0, modes: new Set() };
+            perProfile.opens++;
+            perProfile.modes.add(event.mode);
+            entry.byRef.set(ref, perProfile);
             agg.set(key, entry);
           }
           result.addons = [...agg.entries()]
             .map(([key, entry]) => {
               const lib = state.library.find((item) => addonManifestKey(item.url) === key);
+              const breakdown = [...entry.byRef.entries()]
+                .map(([ref, value]) => {
+                  const info = refInfo.get(ref) || {};
+                  return {
+                    ref,
+                    profileName: info.profileName || ref,
+                    accountName: info.accountName || "",
+                    avatarUrl: info.avatarUrl || "",
+                    opens: value.opens,
+                    modes: [...value.modes],
+                  };
+                })
+                .sort((a, b) => b.opens - a.opens);
               return {
                 key,
                 name: lib?.name || key,
@@ -1544,6 +1565,7 @@ const server = http.createServer(async (req, res) => {
                 opens: entry.opens,
                 profiles: entry.profiles.size,
                 modes: [...entry.modes],
+                breakdown,
               };
             })
             .sort((a, b) => b.opens - a.opens)

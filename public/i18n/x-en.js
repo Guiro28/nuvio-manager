@@ -1407,4 +1407,8 @@ export default {
   "Flux ouverts": "Streams opened",
   "Aucun flux relayé. Seuls les addons proxifiés sont comptés.": "No streams relayed yet. Only proxied addons are counted.",
   "{opens} flux · {profiles} profil(s)": "{opens} streams · {profiles} profile(s)",
+  "Détail par profil de {name}": "Per-profile breakdown of {name}",
+  "Addon": "Addon",
+  "{opens} flux ouverts · {profiles} profil(s)": "{opens} streams opened · {profiles} profile(s)",
+  "Flux ouverts par profil": "Streams opened per profile",
 };
