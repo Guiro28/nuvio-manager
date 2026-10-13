@@ -38,9 +38,15 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       <p class="muted">${esc(t("Configure une sortie WARP ou tout autre proxy HTTP(S) ou SOCKS accessible depuis le serveur. Cette adresse est utilisée par les addons attribués au mode « Proxy externe »."))}</p>
       <p>${proxy.configured ? `${esc(t("✓ Proxy {type} configuré :", { type: proxy.type }))} <code>${esc(proxy.display)}</code>${proxy.source === "environment" ? ` · ${esc(t("variable d’environnement"))}` : ""}` : esc(t("Aucun proxy externe configuré."))}</p>
       ${proxy.valid === false ? `<p class="error">${esc(proxy.error)}</p>` : ""}
+      <div class="proxy-diagnostics">
+        <div class="actions"><button type="button" id="detect-warp">${esc(t("Détecter WARP"))}</button></div>
+        <p id="warp-detection-result" class="muted" role="status" aria-live="polite">${esc(t("Détection de WARP…"))}</p>
+        <div id="warp-candidates"></div>
+      </div>
       <form id="proxy-form" class="form">
         <label>${esc(t("URL du proxy"))}<input name="externalProxyUrl" type="text" inputmode="url" autocomplete="off" data-form-type="other" spellcheck="false" maxlength="4096" placeholder="socks5://utilisateur:mot-de-passe@serveur:1080" required></label>
         <p class="muted">${esc(t("Protocoles acceptés : HTTP, HTTPS, SOCKS, SOCKS4 et SOCKS5. Les identifiants peuvent être inclus dans l’URL et restent chiffrés sur le serveur."))}</p>
+        <p class="muted">${esc(t("Docker : socks5://warp:1080 (réseau partagé). WARP local : socks5://127.0.0.1:40000. Dans Docker, 127.0.0.1 désigne le conteneur du manager, pas l’hôte."))}</p>
         <div class="actions"><button class="primary">${esc(t("Enregistrer le proxy"))}</button><button type="button" id="test-proxy">${esc(t("Tester cette adresse"))}</button>${proxy.configured ? `<button type="button" id="remove-proxy">${esc(t("Désactiver"))}</button>` : ""}</div>
         <p id="proxy-test-result" class="muted"></p>
       </form>
@@ -143,6 +149,44 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
   };
 
   const proxyInput = $("#proxy-form [name=externalProxyUrl]");
+  const warpLabel = (status) => status === "on" ? t("WARP actif")
+    : status === "plus" ? t("WARP+ actif")
+    : status === "off" ? t("WARP désactivé") : t("État WARP inconnu");
+  const detectWarp = async () => {
+    const button = $("#detect-warp"), output = $("#warp-detection-result");
+    button.disabled = true;
+    output.textContent = t("Détection de WARP…");
+    try {
+      const diagnostic = await api("settings/proxy/detect");
+      output.textContent = diagnostic.suggestedUrl
+        ? t("WARP détecté · adresse à utiliser : {url}", { url: diagnostic.suggestedUrl })
+        : t("Aucune sortie WARP active détectée depuis le manager.");
+      $("#warp-candidates").innerHTML = diagnostic.results.map((result, index) => `
+        <div class="proxy-candidate">
+          <div><code>${esc(result.display)}</code><p class="muted">${esc(result.available
+            ? `${t("Proxy accessible")} · ${warpLabel(result.warp)} · ${t("IP de sortie : {ip}", { ip: result.ip })}`
+            : t("Adresse inaccessible depuis le manager."))}</p></div>
+          ${result.available && result.usableUrl ? `<div class="actions"><button type="button" data-use-proxy="${index}">${esc(t("Utiliser cette adresse"))}</button><button type="button" data-copy-proxy="${index}">${esc(t("Copier"))}</button></div>` : ""}
+        </div>`).join("");
+      $("#warp-candidates").querySelectorAll("[data-use-proxy]").forEach(button => {
+        button.onclick = () => {
+          proxyInput.value = diagnostic.results[Number(button.dataset.useProxy)].usableUrl;
+          proxyInput.focus();
+          $("#proxy-test-result").textContent = t("Adresse renseignée : testez-la puis enregistrez-la.");
+        };
+      });
+      $("#warp-candidates").querySelectorAll("[data-copy-proxy]").forEach(button => {
+        button.onclick = () => run(async () => {
+          await navigator.clipboard.writeText(diagnostic.results[Number(button.dataset.copyProxy)].usableUrl);
+          toast(t("Adresse copiée."));
+        });
+      });
+    } catch {
+      output.textContent = t("Détection impossible. Réessayez ou testez une adresse manuellement.");
+    } finally { button.disabled = false; }
+  };
+  $("#detect-warp").onclick = detectWarp;
+  void detectWarp();
   $("#proxy-form").onsubmit = (event) => {
     event.preventDefault();
     run(async () => {
@@ -152,9 +196,10 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
     });
   };
   $("#test-proxy").onclick = () => run(async () => {
+    $("#proxy-test-result").textContent = t("Test en cours…");
     const result = await api("settings/proxy/test", { url: proxyInput.value.trim() });
     $("#proxy-test-result").textContent = result.ok
-      ? t("Connexion réussie · IP de sortie : {ip}", { ip: result.ip })
+      ? `${t("Connexion réussie · IP de sortie : {ip}", { ip: result.ip })} · ${warpLabel(result.warp)}`
       : t("Échec : {error}", { error: result.error });
   });
   if ($("#remove-proxy"))
