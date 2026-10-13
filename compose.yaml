@@ -9,8 +9,8 @@ services:
     # environment:
       # ADMIN_USERNAME: admin
       # ADMIN_PASSWORD: change-moi-12-caracteres-minimum
-      # PUBLIC_URL: https://manager.example.com # Adresse publique HTTPS du dashboard.
-      # DISABLE_LOGIN: "true" # Désactiver la page de connexion du manager (UNIQUEMENT derrière une authentification externe type OAuth : sinon l'accès est ouvert en admin).
+      # PUBLIC_URL: https://manager.example.com    # Adresse publique HTTPS du dashboard.
+      # DISABLE_LOGIN: "true"                      # Désactiver la page de connexion du manager (UNIQUEMENT derrière une authentification externe type OAuth : sinon l'accès est ouvert en admin).
     volumes:
       - manager-data:/app/data
 volumes:
