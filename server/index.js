@@ -6,6 +6,7 @@ import { createHistoryStore } from "./history-store.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestLogo } from "./manifest.js";
 import { createIntegratedProxy, normalizeProxyUrl, proxySummary } from "./integrated-proxy.js";
+import { createProxyDiagnostics } from "./proxy-diagnostics.js";
 import {
   startTrakt,
   pollTrakt,
@@ -276,6 +277,9 @@ const saveSessions = () =>
     version: 1,
     entries: Object.fromEntries(sessions),
   });
+const proxyDiagnostics = createProxyDiagnostics({
+  getProxyUrl: effectiveProxyUrl,
+});
 const issueSession = (res, req, role = "admin", account = null) => {
   const sid = crypto.randomBytes(32).toString("hex");
   sessions.set(sid, { exp: Date.now() + 8 * 3600 * 1000, role, account });
@@ -996,7 +1000,7 @@ const server = http.createServer(async (req, res) => {
       const isAdmin = isLocalAdmin || (viewer.role === "nuvio" && adminAccountIds.includes(viewer.account));
       const ADMIN_ONLY = new Set([
         "/api/settings", "/api/settings/tmdb", "/api/settings/proxy", "/api/settings/public-url",
-        "/api/settings/proxy/test", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
+        "/api/settings/proxy/test", "/api/settings/proxy/detect", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
         "/api/settings/history", "/api/history/status", "/api/history/sync",
         "/api/settings/login",
         "/api/overview", "/api/metrics/history",
@@ -1122,13 +1126,21 @@ const server = http.createServer(async (req, res) => {
         savePanel();
         return json(res, { ok: true, url: panel.publicUrl });
       }
+      if (route === "/api/settings/proxy/detect") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        return json(res, await proxyDiagnostics.detect());
+      }
       if (route === "/api/settings/proxy/test") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
         const candidate = typeof b.url === "string" && b.url.trim()
           ? normalizeProxyUrl(b.url)
           : effectiveProxyUrl();
         assert(candidate, "Aucun proxy externe n’est configuré");
-        return json(res, await addonProxy.test("warp", candidate));
+        const result = await addonProxy.test("warp", candidate);
+        const trace = result.ok ? await proxyDiagnostics.probe(candidate) : null;
+        return json(res, result.ok
+          ? { ...result, warp: trace?.warp || "unknown" }
+          : { ok: false, mode: "warp", error: "Proxy inaccessible depuis le manager." });
       }
       if (route === "/api/settings/admins") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
@@ -2106,6 +2118,9 @@ const server = http.createServer(async (req, res) => {
       "/aurora.css": "aurora.css",
     };
     assert(files[url.pathname], "Page introuvable", 404);
+    // Static assets are unversioned: never let a browser or an edge cache
+    // (Cloudflare) serve a stale UI after an update.
+    res.setHeader("Cache-Control", "no-store");
     res.setHeader(
       "Content-Security-Policy",
       // style-src allows 'unsafe-inline' because charts/bars/timeline set computed

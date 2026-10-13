@@ -2096,6 +2096,10 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .auth-mode {display:grid;gap:8px;margin:0;padding:14px 18px;border:1px solid var(--border);border-radius:10px;min-width:0;}
 .auth-mode legend {padding:0 7px;color:var(--text-secondary);font-size:.875rem;}
 .auth-mode [hidden] {display:none;}
+.proxy-diagnostics {margin:16px 0;padding:16px;border:1px solid var(--border);border-radius:10px;}
+.proxy-candidate {display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--border);}
+.proxy-candidate code {overflow-wrap:anywhere;}
+.proxy-candidate p {margin:6px 0 0;}
 .profile-avatar-fieldset {display:grid;gap:16px;margin:0;padding:18px;border:1px solid var(--border);border-radius:10px;min-width:0;}
 .profile-avatar-fieldset legend {padding:0 7px;color:var(--text-secondary);font-size:.875rem;}
 .profile-avatar-fieldset h3 {margin:0;font-size:.92rem;}
