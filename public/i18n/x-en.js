@@ -1398,4 +1398,9 @@ export default {
   "Addons à ajouter": "Addons to add",
   "Les addons déjà présents sur ce profil verront leur mode mis à jour.": "Addons already on this profile will have their mode updated.",
   "Sélectionne au moins un addon.": "Select at least one addon.",
+  "Sans proxy": "No proxy",
+  "Proxy interne": "Internal proxy",
+  "Gérer les profils": "Manage profiles",
+  "Profils utilisant « {name} »": "Profiles using “{name}”",
+  "Choisissez le mode de proxy de chaque profil. Une confirmation s’affiche avant l’enregistrement.": "Choose the proxy mode for each profile. A confirmation appears before saving.",
 };

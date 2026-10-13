@@ -1217,33 +1217,23 @@ async function renderLibrary() {
     } catch {}
     return `<span class="addon-logo"><span>${esc((addon.name || "A").slice(0, 1).toUpperCase())}</span>${source ? `<img src="${esc(source)}" alt="${esc(t("Logo de {name}", { name: addon.name }))}" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
   };
-  // Proxy-mode <select> for one (addon, profile): change applies through the same
-  // preview/apply pipeline (backup + diff confirmation) as a manual assignment.
-  const MODE_LABELS = () => ({
-    none: t("Sans proxy · URL d’origine"),
-    direct: t("Proxy · IP du serveur"),
-    warp: t("Proxy externe · WARP, SOCKS ou HTTP"),
-  });
-  const modeSelect = (addonId, u) => {
-    const labels = MODE_LABELS();
-    const opts = ["none", "direct", "warp"]
-      .map((m) => `<option value="${m}" ${u.mode === m ? "selected" : ""}>${esc(labels[m])}</option>`)
-      .join("");
-    return `<select class="lib-mode lib-mode-${esc(u.mode)}" data-mode-addon="${esc(addonId)}" data-mode-account="${esc(u.accountId)}" data-mode-profile="${u.profileId}">${opts}</select>`;
-  };
-  const profileRow = (addonId, u) =>
-    `<div class="lib-profile">${profileAvatar(u.identity)}<div class="lib-profile-meta"><span class="lib-profile-name">${esc(u.identity.name || u.profileName)}</span><span class="muted">${esc(u.accountName)}${u.provider === "tuvora" ? " · Tuvora" : ""}${u.enabled === false ? " · " + esc(t("désactivé")) : ""}</span></div>${modeSelect(addonId, u)}<button class="icon-btn" data-remove-addon="${esc(addonId)}" data-remove-account="${esc(u.accountId)}" data-remove-profile="${u.profileId}" aria-label="${esc(t("Retirer de ce profil"))}" title="${esc(t("Retirer de ce profil"))}">✕</button></div>`;
+  // The avatars + profile count open a window to manage each profile's proxy mode
+  // (no inline control); everything else on the card stays on a single row.
   const stack = (users) =>
     `<span class="lib-avatar-stack">${users.slice(0, 5).map((u) => profileAvatar(u.identity)).join("")}${users.length > 5 ? `<span class="lib-avatar-more">+${users.length - 5}</span>` : ""}</span>`;
+  const usageControl = (a, users) =>
+    users.length
+      ? `<button type="button" class="lib-usage" data-usage="${esc(a.id)}" title="${esc(t("Gérer les profils"))}">${stack(users)}<span class="badge neutral lib-count">${esc(t("{n} profils", { n: users.length }))}</span></button>`
+      : `<span class="badge neutral lib-count lib-count-empty">${esc(t("Aucun profil"))}</span>`;
   const card = (a, users) =>
-    `<article class="addon library-addon"><details open><summary class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><span class="lib-head-right">${users.length ? stack(users) : ""}<span class="badge neutral lib-count">${users.length ? esc(t("{n} profils", { n: users.length })) : esc(t("Aucun profil"))}</span><i class="lib-chevron" aria-hidden="true">⌄</i></span></summary><div class="lib-profiles">${users.length ? users.map((u) => profileRow(a.id, u)).join("") : `<p class="muted lib-empty">${esc(t("Aucun profil n’utilise cet addon pour le moment."))}</p>`}</div></details><div class="actions lib-actions"><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-delete="${a.id}" class="quiet">${esc(t("Retirer du catalogue"))}</button></div></article>`;
+    `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="lib-row-right">${usageControl(a, users)}<div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></div></article>`;
 
   $("#content").innerHTML =
     heading(
       t("nav.library"),
       t("Chaque addon montre les profils qui l’utilisent. Changez le mode de proxy profil par profil."),
-      btn(t("＋ Ajouter un addon"), "new-addon", "primary") +
-        (state.library.length ? btn(t("Attribuer plusieurs addons"), "bulk-assign") : ""),
+      (state.library.length ? btn(t("Attribuer plusieurs addons"), "bulk-assign") : "") +
+        btn(t("＋ Ajouter un addon"), "new-addon", "primary"),
     ) +
     (state.library.length
       ? `<div class="list" id="library-list"><p class="muted lib-loading">${esc(t("Chargement…"))}</p></div>`
@@ -1268,33 +1258,12 @@ async function renderLibrary() {
   list.innerHTML = state.library.map((a) => card(a, usage[a.id] || [])).join("");
   $$("#library-list .addon-logo img, #library-list .profile-avatar").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
 
-  // After a mode change / removal, re-render once the confirmation dialog closes
-  // so every <select> reflects the stored truth (whether the change was applied
-  // or cancelled); if no dialog opened (nothing to change), re-render immediately.
-  const resync = () => {
-    const dlg = $("#dialog");
-    if (dlg.open) dlg.addEventListener("close", () => { if (page === "library") renderLibrary(); }, { once: true });
-    else if (page === "library") renderLibrary();
-  };
-  $$("[data-mode-addon]").forEach((sel) => {
-    sel.onchange = () => run(async () => {
-      await preview({
-        accountId: sel.dataset.modeAccount,
-        profileId: Number(sel.dataset.modeProfile),
-        assignment: { id: sel.dataset.modeAddon, mode: sel.value },
-      });
-      resync();
-    });
-  });
-  $$("[data-remove-addon]").forEach((b) => {
-    b.onclick = () => run(async () => {
-      await preview({
-        accountId: b.dataset.removeAccount,
-        profileId: Number(b.dataset.removeProfile),
-        assignment: { id: b.dataset.removeAddon, mode: "remove" },
-      });
-      resync();
-    });
+  $$("[data-usage]").forEach((b) => {
+    b.onclick = () =>
+      usageDialog(
+        state.library.find((a) => a.id === b.dataset.usage),
+        usage[b.dataset.usage] || [],
+      );
   });
   $$("[data-edit]").forEach(
     (b) =>
@@ -1315,6 +1284,44 @@ async function renderLibrary() {
           );
         })),
   );
+}
+// Window opened from an addon's profile count: manage the proxy mode of each
+// profile using it (segmented buttons, not a dropdown) and detach per profile.
+// Each change goes through the preview/apply pipeline (backup + diff confirmation).
+function usageDialog(addon, users) {
+  if (!addon) return;
+  const MODES = [
+    ["none", t("Sans proxy")],
+    ["direct", t("Proxy interne")],
+    ["warp", t("Proxy externe")],
+  ];
+  const row = (u) =>
+    `<div class="lib-profile">${profileAvatar(u.identity)}<div class="lib-profile-meta"><span class="lib-profile-name">${esc(u.identity.name || u.profileName)}</span><span class="muted">${esc(u.accountName)}${u.provider === "tuvora" ? " · Tuvora" : ""}${u.enabled === false ? " · " + esc(t("désactivé")) : ""}</span></div><div class="mode-toggle" role="group">${MODES.map(([m, label]) => `<button type="button" class="${u.mode === m ? "active" : ""}" data-set-mode="${m}" data-account="${esc(u.accountId)}" data-profile="${u.profileId}">${esc(label)}</button>`).join("")}</div><button class="icon-btn" data-detach data-account="${esc(u.accountId)}" data-profile="${u.profileId}" aria-label="${esc(t("Retirer de ce profil"))}" title="${esc(t("Retirer de ce profil"))}">✕</button></div>`;
+  openDialog(
+    `<h2>${esc(t("Profils utilisant « {name} »", { name: addon.name }))}</h2><div class="form lib-usage-list">${users.length ? users.map(row).join("") : `<p class="muted">${esc(t("Aucun profil n’utilise cet addon pour le moment."))}</p>`}</div>${users.length ? `<p class="muted">${esc(t("Choisissez le mode de proxy de chaque profil. Une confirmation s’affiche avant l’enregistrement."))}</p>` : ""}<div class="dialog-actions"><button data-close>${esc(t("Fermer"))}</button></div>`,
+  );
+  $$("#dialog [data-set-mode]").forEach((b) => {
+    b.onclick = () => {
+      if (b.classList.contains("active")) return;
+      run(() =>
+        preview({
+          accountId: b.dataset.account,
+          profileId: Number(b.dataset.profile),
+          assignment: { id: addon.id, mode: b.dataset.setMode },
+        }),
+      );
+    };
+  });
+  $$("#dialog [data-detach]").forEach((b) => {
+    b.onclick = () =>
+      run(() =>
+        preview({
+          accountId: b.dataset.account,
+          profileId: Number(b.dataset.profile),
+          assignment: { id: addon.id, mode: "remove" },
+        }),
+      );
+  });
 }
 function addonForm(a = {}) {
   openDialog(

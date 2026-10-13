@@ -1383,4 +1383,9 @@ export default {
   "Addons à ajouter": "Addons a añadir",
   "Les addons déjà présents sur ce profil verront leur mode mis à jour.": "Los addons ya presentes en este perfil verán su modo actualizado.",
   "Sélectionne au moins un addon.": "Selecciona al menos un addon.",
+  "Sans proxy": "Sin proxy",
+  "Proxy interne": "Proxy interno",
+  "Gérer les profils": "Gestionar perfiles",
+  "Profils utilisant « {name} »": "Perfiles que usan «{name}»",
+  "Choisissez le mode de proxy de chaque profil. Une confirmation s’affiche avant l’enregistrement.": "Elige el modo de proxy de cada perfil. Aparece una confirmación antes de guardar.",
 };
