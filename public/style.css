@@ -743,6 +743,8 @@ header {
 }
 .lib-pick:hover { background: var(--selected); }
 .lib-pick-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-drag { flex: 0 0 auto; cursor: grab; color: var(--text-muted); font-size: 1rem; line-height: 1; user-select: none; }
+.lib-pick.dragging { opacity: 0.5; background: var(--selected); }
 .addon-logo-sm {
   flex: 0 0 30px;
   width: 30px;

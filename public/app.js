@@ -1366,6 +1366,42 @@ async function assign(id) {
     );
 }
 // Add several library addons to one profile in a single pass (same proxy mode).
+// Native drag-and-drop reordering of a `.lib-pick` list. The submit reads the
+// checked items in DOM order, so reordering here sets the order addons are added.
+function enableListReorder(listEl) {
+  if (!listEl) return;
+  let dragged = null;
+  const afterElement = (y) => {
+    const items = [...listEl.querySelectorAll(".lib-pick:not(.dragging)")];
+    return items.reduce(
+      (closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        return offset < 0 && offset > closest.offset ? { offset, element: child } : closest;
+      },
+      { offset: -Infinity, element: null },
+    ).element;
+  };
+  listEl.querySelectorAll(".lib-pick").forEach((row) => {
+    row.addEventListener("dragstart", (event) => {
+      dragged = row;
+      row.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      try { event.dataTransfer.setData("text/plain", ""); } catch {}
+    });
+    row.addEventListener("dragend", () => {
+      if (dragged) dragged.classList.remove("dragging");
+      dragged = null;
+    });
+  });
+  listEl.addEventListener("dragover", (event) => {
+    if (!dragged) return;
+    event.preventDefault();
+    const after = afterElement(event.clientY);
+    if (after == null) listEl.appendChild(dragged);
+    else listEl.insertBefore(dragged, after);
+  });
+}
 // Addons already installed on the profile have their mode updated in place.
 async function bulkAssign() {
   if (!accountId) return toast(t("Connecte d’abord un compte Nuvio."));
@@ -1374,13 +1410,14 @@ async function bulkAssign() {
   const checklist = state.library
     .map(
       (a) =>
-        `<label class="check-label lib-pick"><input type="checkbox" value="${esc(a.id)}">${addonLogoHtml(a, "addon-logo-sm")}<span class="lib-pick-name">${esc(a.name)}</span></label>`,
+        `<label class="check-label lib-pick" draggable="true"><span class="lib-drag" aria-hidden="true">⠿</span><input type="checkbox" value="${esc(a.id)}">${addonLogoHtml(a, "addon-logo-sm")}<span class="lib-pick-name">${esc(a.name)}</span></label>`,
     )
     .join("");
   openDialog(
-    `<h2>${esc(t("Attribuer plusieurs addons"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="bulk-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="bulk-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="bulk-mode">${modeOptions}</select></label><div class="lib-pick-head"><span class="muted">${esc(t("Addons à ajouter"))}</span><button type="button" id="bulk-all" class="quiet">${esc(t("Tout sélectionner"))}</button></div><div class="lib-picklist">${checklist}</div><p class="muted">${esc(t("Les addons déjà présents sur ce profil verront leur mode mis à jour."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="bulk-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
+    `<h2>${esc(t("Attribuer plusieurs addons"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="bulk-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="bulk-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="bulk-mode">${modeOptions}</select></label><div class="lib-pick-head"><span class="muted">${esc(t("Addons à ajouter"))}</span><button type="button" id="bulk-all" class="quiet">${esc(t("Tout sélectionner"))}</button></div><div class="lib-picklist">${checklist}</div><p class="muted">${esc(t("Glissez les addons pour définir leur ordre d’ajout."))}</p><p class="muted">${esc(t("Les addons déjà présents sur ce profil verront leur mode mis à jour."))}</p></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="bulk-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
   );
   $$("#dialog .lib-pick .addon-logo img").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
+  enableListReorder($("#dialog .lib-picklist"));
   $("#bulk-account").onchange = (e) =>
     run(async () => {
       $("#bulk-profile").innerHTML = profileOptions(
