@@ -333,12 +333,9 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       popularMovies: data.top.filter((item) => item.kind === "movie").slice(0, 5),
     };
     const activeProfiles = [...data.profiles].sort((a, b) => b.plays - a.plays);
-    const recentItems = [...new Map(
-      data.recent.map((item) => [
-        `${item.contentId}:${item.season ?? ""}:${item.episode ?? ""}`,
-        item,
-      ]),
-    ).values()];
+    // Chaque visionnage est affiché dans l'ordre, sans fusionner les doublons :
+    // un même film peut apparaître plusieurs fois.
+    const recentItems = data.recent || [];
     $("#stats-view").innerHTML = `
       <section class="stats-metrics">
         ${metric(t("Profils comparés"), data.totals.profiles)}
