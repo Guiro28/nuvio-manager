@@ -1481,7 +1481,7 @@ const server = http.createServer(async (req, res) => {
             .filter(Boolean),
         )].sort();
         const statsAccounts = isAdmin ? state.accounts : state.accounts.filter((a) => a.id === viewer.account);
-        const cacheKey = `stats-v10:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
+        const cacheKey = `stats-v11:${uiLang}:${viewer.account || "admin"}:${days}:${requestedProfiles.join(",")}`;
         const cached = statisticsCache.get(cacheKey);
         if (!url.searchParams.has("refresh") && cached?.expiresAt > Date.now())
           return json(res, cached.value);

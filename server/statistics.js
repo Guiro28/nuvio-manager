@@ -201,7 +201,7 @@ export function summarizeStatistics(profiles, days = 30, now = Date.now()) {
       .map((row) => ({ ...row, profiles: row.profiles.size }))
       .sort((a, b) => b.plays - a.plays),
     overlap,
-    recent: allEvents.slice(0, 50),
+    recent: allEvents.slice(0, 200),
   };
 }
 

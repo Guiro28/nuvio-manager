@@ -355,7 +355,7 @@ export async function renderStatistics(container, { api, run, openDialog }) {
         ${addonCard(data.addons || [])}
         ${profileRankingCard(activeProfiles)}
       </section>
-      ${recentShelf(recentItems.slice(0, 20))}
+      ${recentShelf(recentItems.slice(0, 100))}
       <p class="footer-note">${esc(t("Le temps suivi est estimé à partir de la progression Nuvio et de la durée des lectures Trakt et Simkl. Une durée moyenne est utilisée lorsque le service ne fournit pas cette information."))}</p>`;
     bindRankingPreviews();
     bindRecentShelf();
