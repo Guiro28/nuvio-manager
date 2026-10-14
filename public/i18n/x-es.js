@@ -1406,4 +1406,5 @@ export default {
   "{n} profil(s) mis à jour, {f} échec(s).": "{n} perfil(es) actualizado(s), {f} fallo(s).",
   "Les profils ayant déjà cet addon verront leur mode mis à jour. Une sauvegarde est créée par profil.": "Los perfiles que ya usan este addon verán su modo actualizado. Se crea una copia de seguridad por perfil.",
   "Glissez les addons pour définir leur ordre d’ajout.": "Arrastra los addons para definir su orden de adición.",
+  "Modifiez le mode de chaque profil puis enregistrez.": "Cambia el modo de cada perfil y luego guarda.",
 };

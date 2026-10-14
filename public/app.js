@@ -1290,9 +1290,9 @@ async function renderLibrary() {
         })),
   );
 }
-// Window opened from an addon's profile count: manage the proxy mode of each
-// profile using it (segmented buttons, not a dropdown) and detach per profile.
-// Each change goes through the preview/apply pipeline (backup + diff confirmation).
+// Window opened from an addon's profile count: a STAGED editor of the proxy mode
+// for every profile using it. Mode changes and removals are collected locally and
+// applied together on "Enregistrer" (one backup per affected profile server-side).
 function usageDialog(addon, users) {
   if (!addon) return;
   const MODES = [
@@ -1301,32 +1301,47 @@ function usageDialog(addon, users) {
     ["warp", t("Proxy externe")],
   ];
   const row = (u) =>
-    `<div class="lib-profile">${profileAvatar(u.identity)}<div class="lib-profile-meta"><span class="lib-profile-name">${esc(u.identity.name || u.profileName)}</span><span class="muted">${esc(u.accountName)}${u.provider === "tuvora" ? " · Tuvora" : ""}${u.enabled === false ? " · " + esc(t("désactivé")) : ""}</span></div><div class="mode-toggle" role="group">${MODES.map(([m, label]) => `<button type="button" class="${u.mode === m ? "active" : ""}" data-set-mode="${m}" data-account="${esc(u.accountId)}" data-profile="${u.profileId}">${esc(label)}</button>`).join("")}</div><button class="icon-btn" data-detach data-account="${esc(u.accountId)}" data-profile="${u.profileId}" aria-label="${esc(t("Retirer de ce profil"))}" title="${esc(t("Retirer de ce profil"))}">✕</button></div>`;
+    `<div class="lib-profile" data-ref="${esc(u.accountId)}:${u.profileId}" data-original="${esc(u.mode)}" data-mode="${esc(u.mode)}">${profileAvatar(u.identity)}<div class="lib-profile-meta"><span class="lib-profile-name">${esc(u.identity.name || u.profileName)}</span><span class="muted">${esc(u.accountName)}${u.provider === "tuvora" ? " · Tuvora" : ""}${u.enabled === false ? " · " + esc(t("désactivé")) : ""}</span></div><div class="mode-toggle" role="group">${MODES.map(([m, label]) => `<button type="button" class="${u.mode === m ? "active" : ""}" data-set-mode="${m}">${esc(label)}</button>`).join("")}</div><button type="button" class="icon-btn" data-remove-toggle aria-label="${esc(t("Retirer de ce profil"))}" title="${esc(t("Retirer de ce profil"))}">✕</button></div>`;
   openDialog(
-    `<h2>${esc(t("Profils utilisant « {name} »", { name: addon.name }))}</h2><div class="form lib-usage-list">${users.length ? users.map(row).join("") : `<p class="muted">${esc(t("Aucun profil n’utilise cet addon pour le moment."))}</p>`}</div>${users.length ? `<p class="muted">${esc(t("Choisissez le mode de proxy de chaque profil. Une confirmation s’affiche avant l’enregistrement."))}</p>` : ""}<div class="dialog-actions"><button data-close>${esc(t("Fermer"))}</button></div>`,
+    `<h2>${esc(t("Profils utilisant « {name} »", { name: addon.name }))}</h2><div class="form lib-usage-list">${users.length ? users.map(row).join("") : `<p class="muted">${esc(t("Aucun profil n’utilise cet addon pour le moment."))}</p>`}</div>${users.length ? `<p class="muted">${esc(t("Modifiez le mode de chaque profil puis enregistrez."))}</p>` : ""}<div class="dialog-actions"><button data-close>${esc(t("Fermer"))}</button>${users.length ? `<button id="usage-save" class="primary">${esc(t("Enregistrer"))}</button>` : ""}</div>`,
   );
+  $$("#dialog .lib-profile .profile-avatar").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
   $$("#dialog [data-set-mode]").forEach((b) => {
     b.onclick = () => {
-      if (b.classList.contains("active")) return;
-      run(() =>
-        preview({
-          accountId: b.dataset.account,
-          profileId: Number(b.dataset.profile),
-          assignment: { id: addon.id, mode: b.dataset.setMode },
-        }),
-      );
+      const toggle = b.closest(".mode-toggle");
+      toggle.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+      const profileRow = b.closest(".lib-profile");
+      profileRow.dataset.mode = b.dataset.setMode;
+      profileRow.classList.remove("removing");
+      profileRow.querySelector("[data-remove-toggle]")?.classList.remove("active");
     };
   });
-  $$("#dialog [data-detach]").forEach((b) => {
-    b.onclick = () =>
-      run(() =>
-        preview({
-          accountId: b.dataset.account,
-          profileId: Number(b.dataset.profile),
-          assignment: { id: addon.id, mode: "remove" },
-        }),
-      );
+  $$("#dialog [data-remove-toggle]").forEach((b) => {
+    b.onclick = () => {
+      const profileRow = b.closest(".lib-profile");
+      b.classList.toggle("active", profileRow.classList.toggle("removing"));
+    };
   });
+  const save = $("#usage-save");
+  if (save)
+    save.onclick = () =>
+      run(async () => {
+        const changes = [];
+        $$("#dialog .lib-profile").forEach((profileRow) => {
+          const mode = profileRow.classList.contains("removing") ? "remove" : profileRow.dataset.mode;
+          if (mode !== profileRow.dataset.original) changes.push({ ref: profileRow.dataset.ref, mode });
+        });
+        if (!changes.length) return toast(t("Aucune modification à appliquer."));
+        const result = await api("library/set-modes", { id: addon.id, changes });
+        $("#dialog").close();
+        await render();
+        const failed = (result.results || []).filter((r) => !r.ok).length;
+        toast(
+          failed
+            ? t("{n} profil(s) mis à jour, {f} échec(s).", { n: result.applied, f: failed })
+            : t("{n} profil(s) mis à jour.", { n: result.applied }),
+        );
+      });
 }
 function addonForm(a = {}) {
   openDialog(

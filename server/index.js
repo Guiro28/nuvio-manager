@@ -1017,7 +1017,7 @@ const server = http.createServer(async (req, res) => {
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
-        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/usage", "/api/library/assign-many",
+        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/usage", "/api/library/assign-many", "/api/library/set-modes",
         "/api/backup/create", "/api/backup/delete", "/api/backup/restore",
         "/api/backup/restore-file", "/api/backup/download",
       ]);
@@ -1940,6 +1940,60 @@ const server = http.createServer(async (req, res) => {
             const backupId = await backup(a, "Avant attribution multi-profils");
             await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: rows, ...originId(a) }, t, a.provider);
             addonProxy.reconcile(a.id, profileId, rows.map((x) => x.url));
+            historyStore.refreshAddons(`${a.id}:${profileId}`);
+            results.push({ ref, ok: true, backupId });
+          } catch (error) {
+            results.push({ ref, ok: false, error: error.message });
+          } finally {
+            locks.delete(lockKey);
+          }
+        }
+        return json(res, { applied: results.filter((r) => r.ok).length, results });
+      }
+      if (route === "/api/library/set-modes") {
+        // Apply a per-profile set of proxy-mode changes (or removals) for ONE
+        // addon in one go — the "Enregistrer" of the usage editor. Each affected
+        // profile gets its own backup; failures are reported per profile.
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const item = state.library.find((x) => x.id === b.id);
+        assert(item, "Addon introuvable");
+        const changes = Array.isArray(b.changes) ? b.changes : [];
+        assert(changes.length, "Aucune modification");
+        const manifestKey = addonManifestKey(item.url);
+        const results = [];
+        for (const change of changes) {
+          const ref = String(change.ref || `${change.accountId}:${change.profileId}`);
+          const [accId, pidStr] = ref.split(":");
+          const profileId = Number(pidStr);
+          const mode = change.mode;
+          if (!["none", "direct", "warp", "remove"].includes(mode)) {
+            results.push({ ref, ok: false, error: "Mode proxy invalide" });
+            continue;
+          }
+          const lockKey = `${accId}:${profileId}`;
+          if (locks.has(lockKey)) {
+            results.push({ ref, ok: false, error: "Une écriture est en cours" });
+            continue;
+          }
+          locks.add(lockKey);
+          try {
+            const a = account(accId);
+            const t = await token(a);
+            const target = await profile(t, profileId, a.provider);
+            const rows = writableList(target.addons);
+            let desired;
+            if (mode === "remove") {
+              desired = rows.filter((x) => addonManifestKey(x.url) !== manifestKey).map((x, i) => ({ ...x, sort_order: i }));
+            } else {
+              const installUrl = await installation(item, mode, { accountId: a.id, profileId });
+              const matchIndex = rows.findIndex((x) => addonManifestKey(x.url) === manifestKey);
+              if (matchIndex >= 0) rows[matchIndex] = { ...rows[matchIndex], url: installUrl, name: item.name };
+              else rows.push({ url: installUrl, name: item.name, enabled: true, sort_order: rows.length });
+              desired = rows;
+            }
+            const backupId = await backup(a, "Avant modification des modes de proxy");
+            await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: desired, ...originId(a) }, t, a.provider);
+            addonProxy.reconcile(a.id, profileId, desired.map((x) => x.url));
             historyStore.refreshAddons(`${a.id}:${profileId}`);
             results.push({ ref, ok: true, backupId });
           } catch (error) {

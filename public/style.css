@@ -715,6 +715,9 @@ header {
   place-items: center;
   line-height: 1;
 }
+.icon-btn.active { color: var(--danger, #e05a5a); border-color: var(--danger, #e05a5a); }
+.lib-profile.removing { opacity: 0.5; }
+.lib-profile.removing .lib-profile-name { text-decoration: line-through; }
 
 /* Attribution multiple : liste à cocher des addons. */
 .lib-pick-head {

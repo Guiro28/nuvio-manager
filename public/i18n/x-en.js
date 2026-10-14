@@ -1421,4 +1421,5 @@ export default {
   "{n} profil(s) mis à jour, {f} échec(s).": "{n} profile(s) updated, {f} failure(s).",
   "Les profils ayant déjà cet addon verront leur mode mis à jour. Une sauvegarde est créée par profil.": "Profiles already using this addon will have their mode updated. A backup is created per profile.",
   "Glissez les addons pour définir leur ordre d’ajout.": "Drag the addons to set the order they're added in.",
+  "Modifiez le mode de chaque profil puis enregistrez.": "Change the mode for each profile, then save.",
 };
