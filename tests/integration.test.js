@@ -446,7 +446,7 @@ async function startManager(t, env) {
     const timer = setTimeout(() => reject(Error("Server startup timeout")), 10000);
     child.stdout.on("data", (chunk) => {
       output += chunk;
-      const manager = output.match(/Nuvio Manager : http:\/\/localhost:(\d+)/);
+      const manager = output.match(/http:\/\/localhost:(\d+)/);
       if (manager) {
         clearTimeout(timer);
         resolve(`http://127.0.0.1:${manager[1]}`);

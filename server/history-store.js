@@ -188,8 +188,11 @@ export function createHistoryStore({
   }
 
   async function run({ heavy } = {}) {
+    const startedAt = Date.now();
     const accounts = getAccounts();
+    log.info?.(`synchronisation démarrée`, { heavy: Boolean(heavy), accounts: accounts.length });
     const tasks = [];
+    let failures = 0;
     const enumerated = new Set(); // accounts whose profile list we could read
     const existing = new Set(); // refs that still exist upstream (enumerated)
     for (const account of accounts) {
@@ -202,7 +205,8 @@ export function createHistoryStore({
           tasks.push({ account, identity });
         }
       } catch (error) {
-        log.error?.(`[history] profils ${account.email || account.id} :`, error.message);
+        failures++;
+        log.error?.(`énumération des profils échouée`, { account: account.email || account.id, error: error.message });
       }
     }
 
@@ -213,6 +217,8 @@ export function createHistoryStore({
         store.profiles[ref] = await fetchProfile(account, identity, { heavy, prev });
       } catch (error) {
         // Keep the last good data; only record the error.
+        failures++;
+        log.debug?.(`profil non synchronisé`, { ref, error: error.message });
         if (prev) {
           prev.lastError = error.message;
         } else {
@@ -234,7 +240,6 @@ export function createHistoryStore({
             lastError: error.message,
           };
         }
-        log.error?.(`[history] ${ref} :`, error.message);
       }
     });
 
@@ -251,10 +256,18 @@ export function createHistoryStore({
     if (heavy) store.lastFullSync = Date.now();
     save(store);
 
+    log.info?.(`synchronisation terminée`, {
+      heavy: Boolean(heavy),
+      profiles: tasks.length,
+      stored: Object.keys(store.profiles).length,
+      failures,
+      ms: Date.now() - startedAt,
+    });
+
     // Warm derived caches (e.g. TMDB metadata) in the background so stats render
     // instantly. Non-blocking: never let it hold up or fail the sync. Only after a
     // heavy run, since light runs leave the history untouched.
-    if (heavy && onSync) Promise.resolve(onSync(store)).catch((error) => log.error?.("[history] onSync :", error.message));
+    if (heavy && onSync) Promise.resolve(onSync(store)).catch((error) => log.error?.(`pré-chauffage TMDB échoué`, { error: error.message }));
   }
 
   // One sync at a time; callers awaiting during a run share the in-flight one.
@@ -265,7 +278,7 @@ export function createHistoryStore({
     if (running) return running;
     const heavy = force || isEnabled();
     running = run({ heavy })
-      .catch((error) => log.error?.("[history] sync :", error.message))
+      .catch((error) => log.error?.(`synchronisation échouée`, { error: error.message }))
       .finally(() => {
         running = null;
       });
@@ -298,7 +311,7 @@ export function createHistoryStore({
   // the manager rewrites a profile's addons so the library reflects it at once.
   function refreshAddons(ref) {
     return syncProfile(ref, { heavy: false }).catch((error) => {
-      log.error?.(`[history] addons ${ref} :`, error.message);
+      log.error?.(`rafraîchissement des addons échoué`, { ref, error: error.message });
     });
   }
 

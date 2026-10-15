@@ -1,16 +1,27 @@
 import { assert } from "./core.js";
+import { log } from "./logger.js";
 
 const TRAKT = "https://api.trakt.tv";
 const SIMKL = "https://api.simkl.com";
 const requestJson = async (url, options = {}, fetchImpl = fetch) => {
-  const response = await fetchImpl(url, {
-    redirect: "error",
-    signal: AbortSignal.timeout(20000),
-    ...options,
-  });
+  const method = options.method || "GET";
+  const started = Date.now();
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      redirect: "error",
+      signal: AbortSignal.timeout(20000),
+      ...options,
+    });
+  } catch (error) {
+    log.warn("tracker", `${method} échec réseau`, { url, ms: Date.now() - started, error: error.message });
+    throw error;
+  }
   const text = await response.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch {}
+  // 400/429/418 are normal device-flow control codes, so no warn here.
+  log.debug("tracker", `${method} ${response.status}`, { url, ms: Date.now() - started });
   return { response, data };
 };
 const jsonHeaders = { "Content-Type": "application/json", Accept: "application/json" };

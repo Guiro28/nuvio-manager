@@ -1,4 +1,5 @@
 import { assert } from "./core.js";
+import { log } from "./logger.js";
 
 // Providers that share the Nuvio-fork Supabase backend and TV-login pairing
 // flow. Tuvora is a GPL-3.0 fork of Nuvio adding IPTV and a sports guide; it
@@ -49,24 +50,43 @@ export async function call(
 ) {
   const provider = providerOf(providerId);
   assert(provider.apiKey, `Clé d’API ${provider.label} manquante`, 500);
-  const response = await fetch(provider.backend + route, {
-    method,
-    redirect: "error",
-    signal: AbortSignal.timeout(25000),
-    headers: {
-      apikey: provider.apiKey,
-      Authorization: `Bearer ${token || provider.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    ...(method === "GET" ? {} : { body: JSON.stringify(body) }),
-  });
+  // Log the backend endpoint without its query string (it can carry ids/tokens);
+  // the request body is NEVER logged (it may contain passwords or access tokens).
+  const label = route.startsWith("/rest/v1/rpc/") ? route.slice("/rest/v1/rpc/".length) : route.split("?")[0];
+  const started = Date.now();
+  let response;
+  try {
+    response = await fetch(provider.backend + route, {
+      method,
+      redirect: "error",
+      signal: AbortSignal.timeout(25000),
+      headers: {
+        apikey: provider.apiKey,
+        Authorization: `Bearer ${token || provider.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      ...(method === "GET" ? {} : { body: JSON.stringify(body) }),
+    });
+  } catch (error) {
+    log.warn("api", `${provider.id} ${method} ${label} échec réseau`, { ms: Date.now() - started, error: error.message });
+    throw error;
+  }
+  const ms = Date.now() - started;
   const text = await response.text();
   let data;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
+    log.warn("api", `${provider.id} ${method} ${label} réponse illisible`, { status: response.status, ms });
     throw new Error(`Réponse ${provider.label} illisible`);
   }
+  if (!response.ok)
+    log.warn("api", `${provider.id} ${method} ${label}`, {
+      status: response.status,
+      ms,
+      error: data?.message || data?.error_description || data?.error || "",
+    });
+  else log.debug("api", `${provider.id} ${method} ${label}`, { status: response.status, ms });
   assert(
     response.ok,
     data?.message ||

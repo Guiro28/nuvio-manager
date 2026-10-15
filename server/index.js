@@ -1,4 +1,5 @@
 import { hashPassword, verifyPassword } from "./panel-auth.js";
+import { log } from "./logger.js";
 import { activity } from "./activity.js";
 import { enrichActivity } from "./tmdb.js";
 import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
@@ -156,7 +157,7 @@ const forwardedHeadersTrusted = () =>
 const SESSION_SAMESITE = (() => {
   const value = String(process.env.SESSION_SAMESITE || "lax").toLowerCase();
   if (!["lax", "strict", "none"].includes(value)) {
-    console.error(`SESSION_SAMESITE ignoré (valeur invalide) : ${value}`);
+    log.warn("system", "SESSION_SAMESITE ignoré (valeur invalide)", { value });
     return "Lax";
   }
   return value[0].toUpperCase() + value.slice(1);
@@ -372,14 +373,14 @@ function applyEnvConfig() {
         changed = true;
       }
     } catch {
-      console.error("PUBLIC_URL ignorée (adresse invalide) :", process.env.PUBLIC_URL);
+      log.warn("system", "PUBLIC_URL ignorée (adresse invalide)", { url: process.env.PUBLIC_URL });
     }
   }
   const user = String(process.env.ADMIN_USERNAME || "").trim();
   const pass = String(process.env.ADMIN_PASSWORD || "");
   if (user && pass) {
     if (pass.length < 12) {
-      console.error("ADMIN_PASSWORD ignoré : 12 caractères minimum requis.");
+      log.warn("system", "ADMIN_PASSWORD ignoré : 12 caractères minimum requis");
     } else {
       adminFromEnv = true;
       if (
@@ -389,7 +390,7 @@ function applyEnvConfig() {
       ) {
         panel.admin = { ...hashPassword(pass), username: user.slice(0, 80) };
         changed = true;
-        console.log(`Administrateur « ${user.slice(0, 80)} » configuré depuis l’environnement.`);
+        log.info("system", "Administrateur configuré depuis l’environnement", { user: user.slice(0, 80) });
       }
     }
   }
@@ -400,7 +401,7 @@ function applyEnvConfig() {
       panel.loginDisabled = want;
       changed = true;
     }
-    if (want) console.log("Page de connexion désactivée (DISABLE_LOGIN).");
+    if (want) log.info("system", "Page de connexion désactivée (DISABLE_LOGIN)");
   }
   if (process.env.AUTH_PROXY !== undefined) {
     authProxyManagedByEnv = true;
@@ -439,6 +440,7 @@ async function prewarmTmdb() {
   // at most one chunk's progress, not the whole run (enrichActivity persists once
   // per call). Cached titles are cheap (no network), so this is near-free when warm.
   const CHUNK = 300;
+  const started = Date.now();
   for (let start = 0; start < items.length; start += CHUNK) {
     await enrichActivity(
       { items: items.slice(start, start + CHUNK) },
@@ -450,6 +452,7 @@ async function prewarmTmdb() {
       },
     );
   }
+  log.debug("tmdb", "pré-chauffage terminé", { titles: items.length, ms: Date.now() - started });
 }
 
 // Background mirror of every profile's history; stats and the history tab read
@@ -466,6 +469,11 @@ const historyStore = createHistoryStore({
   getIntervalMinutes: () => Number(panel.historySyncMinutes) || 30,
   isEnabled: () => panel.historySyncEnabled !== false,
   onSync: prewarmTmdb,
+  log: {
+    info: (message, fields) => log.info("sync", message, fields),
+    error: (message, fields) => log.warn("sync", message, fields),
+    debug: (message, fields) => log.debug("sync", message, fields),
+  },
 });
 // Background sampling of process CPU% and RSS, kept as a 1-week history in the
 // data volume for the home-page chart. A single sampler owns the cpuUsage delta
@@ -629,6 +637,7 @@ async function token(a) {
 async function addSession(t, providerId = "nuvio") {
   const info = await call("/auth/v1/user", null, t.access_token, "GET", providerId);
   let a = state.accounts.find((a) => a.id === info.id);
+  const isNew = !a;
   if (!a) {
     a = { id: info.id };
     state.accounts.push(a);
@@ -641,6 +650,7 @@ async function addSession(t, providerId = "nuvio") {
     expires: Date.now() + t.expires_in * 1000,
   });
   save();
+  log.info("account", isNew ? "compte connecté" : "session renouvelée", { account: a.email || a.id, provider: a.provider });
   return { id: a.id, email: a.email };
 }
 const MAX_BACKUPS_PER_ACCOUNT = 3;
@@ -678,6 +688,7 @@ async function backup(a, reason) {
     reason,
   });
   persistBackups(pruneBackups(a.id));
+  log.debug("backup", "sauvegarde créée", { account: a.email || a.id, reason });
   return id;
 }
 {
@@ -837,6 +848,16 @@ const attempts = new Map();
 const server = http.createServer(async (req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
+  // Access log for every request (one probe covers all routes). The path is
+  // logged without its query string. Relay traffic is very chatty (one hit per
+  // range request), so it is logged at debug; everything else at info.
+  const reqStart = Date.now();
+  const reqPath = (req.url || "").split("?")[0];
+  const clientIp = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket.remoteAddress || "";
+  res.on("finish", () => {
+    const level = reqPath.startsWith("/relay/") ? "debug" : "info";
+    log[level]("http", `${req.method} ${reqPath}`, { status: res.statusCode, ms: Date.now() - reqStart, ip: clientIp });
+  });
   try {
     const url = new URL(req.url, "http://localhost");
     // Only media and manifest routes are public; management endpoints remain private.
@@ -917,11 +938,9 @@ const server = http.createServer(async (req, res) => {
         assert(active.length < 10, "Réessaie dans une minute", 429);
         active.push(Date.now());
         attempts.set(ip, active);
-        assert(
-          authEnabled() && equal(b.user, adminName()) && validPassword(b.password),
-          "Identifiants incorrects",
-          401,
-        );
+        const okLogin = authEnabled() && equal(b.user, adminName()) && validPassword(b.password);
+        log[okLogin ? "info" : "warn"]("auth", `connexion panel ${okLogin ? "réussie" : "échouée"}`, { user: String(b.user || "").slice(0, 80), ip });
+        assert(okLogin, "Identifiants incorrects", 401);
         issueSession(res, req, "admin");
         return json(res, { ok: true });
       }
@@ -966,13 +985,17 @@ const server = http.createServer(async (req, res) => {
             /* wrong password on this provider, try the next match */
           }
         }
-        if (!acc) throw Object.assign(new Error("Identifiants incorrects"), { status: 401 });
+        if (!acc) {
+          log.warn("auth", "connexion compte échouée", { email, ip });
+          throw Object.assign(new Error("Identifiants incorrects"), { status: 401 });
+        }
         if (data.access_token) {
           acc.access = data.access_token;
           acc.refresh = data.refresh_token || acc.refresh;
           acc.expires = Date.now() + (Number(data.expires_in) || 3600) * 1000;
           save();
         }
+        log.info("auth", "connexion compte réussie", { email, provider: acc.provider, ip });
         issueSession(res, req, "nuvio", acc.id);
         return json(res, { ok: true });
       }
@@ -1320,6 +1343,7 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/accounts/remove") {
         const a = account(b.accountId);
         state.accounts = state.accounts.filter((x) => x !== a);
+        log.info("account", "compte retiré", { account: a.email || a.id, provider: a.provider });
         // Kill every relay link of this account so already-saved proxy URLs stop
         // working as soon as it leaves the manager.
         addonProxy.revokeAccount(a.id);
@@ -1721,6 +1745,7 @@ const server = http.createServer(async (req, res) => {
           savePanel();
           trackerPairings.delete(b.id);
           statisticsCache.clear();
+          log.info("tracker", "service connecté", { service: pairing.service, ref });
           return json(res, { status: "connected", service: pairing.service });
         } finally {
           pairing.busy = false;
@@ -1948,6 +1973,7 @@ const server = http.createServer(async (req, res) => {
             locks.delete(lockKey);
           }
         }
+        log.info("library", "attribution multi-profils", { addon: item.name, mode: b.mode, applied: results.filter((r) => r.ok).length, targets: refs.length });
         return json(res, { applied: results.filter((r) => r.ok).length, results });
       }
       if (route === "/api/library/set-modes") {
@@ -2002,6 +2028,7 @@ const server = http.createServer(async (req, res) => {
             locks.delete(lockKey);
           }
         }
+        log.info("library", "modes de proxy mis à jour", { addon: item.name, applied: results.filter((r) => r.ok).length, changes: changes.length });
         return json(res, { applied: results.filter((r) => r.ok).length, results });
       }
       if (route === "/api/proxy/status") {
@@ -2214,6 +2241,7 @@ const server = http.createServer(async (req, res) => {
             // change at once instead of waiting for the next background sync.
             historyStore.refreshAddons(`${p.accountId}:${p.profileId}`);
           }
+          log.info("library", "profil enregistré", { ref: `${p.accountId}:${p.profileId}`, parts: completed.join(",") });
           return json(res, { ok: true, completed, backupId });
         } catch (e) {
           return json(
@@ -2272,6 +2300,7 @@ const server = http.createServer(async (req, res) => {
           method = "fallback";
         }
         statisticsCache.clear();
+        log.info("backup", "restauration", { account: a.email || a.id, method, safetyBackupId });
         return json(res, { ok: true, result, method, rpcError, safetyBackupId });
       }
       if (route === "/api/backup/download") {
@@ -2365,23 +2394,15 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.listen(port, host, () => {
-  console.log(`Nuvio Manager : http://localhost:${server.address().port}`);
+  log.info("system", `Nuvio Manager démarré`, { url: `http://localhost:${server.address().port}`, version: APP_VERSION.version, logLevel: log.levelName });
   if (authProxyEnabled())
-    console.log(
-      "Authentification par proxy externe activée (AUTH_PROXY) : identité X-Auth-Request-* / X-Forwarded-User de confiance.",
-    );
+    log.info("system", "Authentification par proxy externe activée (AUTH_PROXY)");
   // Start the background history mirror (initial fill + periodic refresh).
   if (!setupRequired()) historyStore.start();
-  if (setupRequired()) {
-    console.log(
-      "Configuration initiale requise : ouvre le dashboard pour créer l’administrateur,",
-    );
-    console.log(
-      "ou définis ADMIN_USERNAME / ADMIN_PASSWORD (et PUBLIC_URL) dans l’environnement.",
-    );
-  } else if (!panel.publicUrl) {
-    console.log("Adresse publique à configurer dans les paramètres (ou via PUBLIC_URL).");
-  }
+  if (setupRequired())
+    log.warn("system", "Configuration initiale requise : créer l’administrateur (UI) ou définir ADMIN_USERNAME/ADMIN_PASSWORD/PUBLIC_URL");
+  else if (!panel.publicUrl)
+    log.warn("system", "Adresse publique à configurer (paramètres ou PUBLIC_URL)");
 });
 
 // Optional second listener that serves ONLY the public addon relay (/relay/**).
@@ -2406,6 +2427,6 @@ if (Number.isInteger(relayPort) && relayPort > 0) {
     }
   });
   relayServer.listen(relayPort, host, () => {
-    console.log(`Relais d'addons public : http://localhost:${relayServer.address().port}`);
+    log.info("system", "Relais d'addons public", { url: `http://localhost:${relayServer.address().port}` });
   });
 }

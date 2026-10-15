@@ -1,4 +1,5 @@
 import { assert } from "./core.js";
+import { log } from "./logger.js";
 
 const API = "https://api.themoviedb.org/3";
 const IMAGES = "https://image.tmdb.org/t/p";
@@ -21,6 +22,8 @@ async function request(path, key, fetchImpl) {
     signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) {
+    // Path only (never the URL: it may carry the api_key query param).
+    log.warn("tmdb", "requête échouée", { path: path.split("?")[0], status: response.status });
     const error = new Error(
       response.status === 401 || response.status === 403
         ? "Clé ou jeton TMDB invalide"

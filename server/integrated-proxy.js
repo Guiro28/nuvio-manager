@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.DATA_DIR ||= path.join(root, "data");
 
+import { log } from "./logger.js";
+
 const require = createRequire(import.meta.url);
 const { request, readAll } = require("../vendor/proxy/src/http.js");
 const { decodeToken, fetchManifest, fetchResource } = require("../vendor/proxy/src/addon.js");
@@ -149,6 +151,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
       manifest: grant.manifestUrl,
       mode,
     });
+    log.info("proxy", "flux ouvert", { addon: grant.name || "", mode, ref: `${grant.accountId}:${grant.profileId ?? ""}` });
     const cutoff = Date.now() - OPENS_RETENTION_MS;
     if (state.addonOpens.length > OPENS_MAX || (state.addonOpens[0] && state.addonOpens[0].at < cutoff))
       state.addonOpens = state.addonOpens.filter((e) => e.at >= cutoff).slice(-OPENS_MAX);
@@ -226,6 +229,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
       };
       state.proxyGrants.push(grant);
       save();
+      log.debug("proxy", "lien de relais créé", { addon: meta.name, mode, ref: `${ctx.accountId}:${ctx.profileId}` });
       return grant;
     }
     let addon = state.proxyAddons.find((entry) => entry.manifestUrl === manifestUrl);
@@ -254,7 +258,10 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         g.revokedAt = at;
         n++;
       }
-    if (n) save();
+    if (n) {
+      save();
+      log.info("proxy", "liens révoqués (compte retiré)", { accountId, count: n });
+    }
     return n;
   }
 
@@ -279,7 +286,10 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         g.revokedAt = at;
         n++;
       }
-    if (n) save();
+    if (n) {
+      save();
+      log.info("proxy", "liens révoqués (addon retiré du profil)", { ref: `${accountId}:${profileId}`, count: n });
+    }
     return n;
   }
 
@@ -415,6 +425,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
       }
       return true;
     } catch (error) {
+      log[error.expired ? "debug" : "warn"]("proxy", "relais échoué", { mode, expired: Boolean(error.expired), error: error.message });
       if (!res.headersSent) {
         const statusCode = error.expired ? 410 : 502;
         res.writeHead(statusCode, { "Content-Type": "text/plain; charset=utf-8" });

@@ -17,6 +17,8 @@ services:
       # SESSION_SAMESITE: lax                      # lax (défaut) | strict | none — attribut SameSite du cookie de session.
       # SESSION_DOMAIN: .example.com               # Domaine optionnel du cookie de session.
       # RELAY_PORT: "3101"                         # Écouteur additionnel servant uniquement le relais public /relay/** (hors proxy d'auth).
+      # LOG_LEVEL: info                            # error | warn | info (défaut) | debug — verbosité des logs (debug = très bavard : chaque appel API/relais).
+      # LOG_FORMAT: text                           # text (défaut) | json — format des logs.
     volumes:
       - manager-data:/app/data
   warp:
