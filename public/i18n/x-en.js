@@ -1422,4 +1422,6 @@ export default {
   "Les profils ayant déjà cet addon verront leur mode mis à jour. Une sauvegarde est créée par profil.": "Profiles already using this addon will have their mode updated. A backup is created per profile.",
   "Glissez les addons pour définir leur ordre d’ajout.": "Drag the addons to set the order they're added in.",
   "Modifiez le mode de chaque profil puis enregistrez.": "Change the mode for each profile, then save.",
+  "À propos de ce classement": "About this ranking",
+  "Seuls les addons configurés avec un proxy (interne ou externe) sont comptabilisés.": "Only addons configured with a proxy (internal or external) are counted.",
 };

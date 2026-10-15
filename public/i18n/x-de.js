@@ -1407,4 +1407,6 @@ export default {
   "Les profils ayant déjà cet addon verront leur mode mis à jour. Une sauvegarde est créée par profil.": "Profile, die dieses Addon bereits verwenden, erhalten den aktualisierten Modus. Pro Profil wird eine Sicherung erstellt.",
   "Glissez les addons pour définir leur ordre d’ajout.": "Ziehe die Addons, um ihre Reihenfolge beim Hinzufügen festzulegen.",
   "Modifiez le mode de chaque profil puis enregistrez.": "Ändere den Modus für jedes Profil und speichere dann.",
+  "À propos de ce classement": "Über dieses Ranking",
+  "Seuls les addons configurés avec un proxy (interne ou externe) sont comptabilisés.": "Nur Addons, die mit einem Proxy (intern oder extern) konfiguriert sind, werden gezählt.",
 };

@@ -395,7 +395,7 @@ export async function renderStatistics(container, { api, run, openDialog }) {
     const lead = firstLogo
       ? `<img class="stats-lead-image stats-source-logo" src="${esc(firstLogo)}" alt="${esc(t("Logo de {name}", { name: first.name }))}" loading="lazy" referrerpolicy="no-referrer">`
       : '<span class="stats-lead-image stats-source-logo" aria-hidden="true">⊞</span>';
-    return `<article class="stats-ranking-card stats-preview-card stats-source-preview" data-default-poster="${esc(firstLogo)}" data-default-backdrop="${esc(firstLogo)}" data-default-title="${esc(first?.name || "")}">${background}<div class="stats-card-content"><header><h2>${esc(t("Addons les plus actifs"))}</h2><small>${esc(t("Flux ouverts"))}</small></header>${addons.length ? `<div class="stats-ranking-body">${lead}<ol>${addons.slice(0, 5).map((addon, index) => {
+    return `<article class="stats-ranking-card stats-preview-card stats-source-preview" data-default-poster="${esc(firstLogo)}" data-default-backdrop="${esc(firstLogo)}" data-default-title="${esc(first?.name || "")}">${background}<div class="stats-card-content"><header><h2>${esc(t("Addons les plus actifs"))}</h2><button type="button" class="stats-info-btn" data-info aria-label="${esc(t("À propos de ce classement"))}">i</button><small>${esc(t("Flux ouverts"))}</small></header>${addons.length ? `<div class="stats-ranking-body">${lead}<ol>${addons.slice(0, 5).map((addon, index) => {
       const logo = addon.logo || "";
       return `<li tabindex="0" role="button" data-addon-key="${esc(addon.key)}" aria-label="${esc(t("Détail par profil de {name}", { name: addon.name }))}" ${logo ? `data-preview-poster="${esc(logo)}" data-preview-backdrop="${esc(logo)}"` : ""} data-preview-title="${esc(addon.name)}" title="${esc(t("{opens} flux · {profiles} profil(s)", { opens: addon.opens, profiles: addon.profiles }))}"><b>${index + 1}</b><span>${esc(addon.name)}</span><strong>${addon.opens}</strong></li>`;
     }).join("")}</ol></div>` : `<p class="stats-card-empty">${esc(t("Aucun flux relayé. Seuls les addons proxifiés sont comptés."))}</p>`}</div></article>`;
@@ -668,6 +668,35 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       <div class="dialog-actions"><button type="button" data-close>${esc(t("Fermer"))}</button></div>
     </article>`);
   };
+  // Small floating info bubble anchored under a button. Appended to <body> so it
+  // is never clipped by the card's overflow:hidden. Click the button again or
+  // click outside to dismiss.
+  const toggleInfoBubble = (button, text) => {
+    const open = document.getElementById("stats-info-bubble");
+    if (open) {
+      const sameOwner = open.dataset.owner === button.dataset.infoId;
+      open.remove();
+      document.removeEventListener("click", open._close, true);
+      if (sameOwner) return;
+    }
+    button.dataset.infoId ||= String(Math.random()).slice(2);
+    const bubble = document.createElement("div");
+    bubble.id = "stats-info-bubble";
+    bubble.className = "stats-info-bubble";
+    bubble.textContent = text;
+    bubble.dataset.owner = button.dataset.infoId;
+    document.body.appendChild(bubble);
+    const rect = button.getBoundingClientRect();
+    bubble.style.top = `${Math.round(rect.bottom + 6)}px`;
+    bubble.style.left = `${Math.round(Math.max(8, Math.min(rect.left - 6, window.innerWidth - bubble.offsetWidth - 8)))}px`;
+    const close = (event) => {
+      if (event.target === button || bubble.contains(event.target)) return;
+      bubble.remove();
+      document.removeEventListener("click", close, true);
+    };
+    bubble._close = close;
+    setTimeout(() => document.addEventListener("click", close, true), 0);
+  };
   const bindDetailTriggers = () => {
     const bind = (element, action) => {
       element.addEventListener("click", action);
@@ -689,6 +718,12 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       const addon = (currentData?.addons || []).find((item) => item.key === element.dataset.addonKey);
       if (addon) showAddonDetail(addon);
     }));
+    container.querySelectorAll("[data-info]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleInfoBubble(button, t("Seuls les addons configurés avec un proxy (interne ou externe) sont comptabilisés."));
+      });
+    });
   };
   const timelineChart = (items, availableWidth = 900) => {
     // Bars widen/narrow to fill the tile up to maxFinesse days; beyond that the

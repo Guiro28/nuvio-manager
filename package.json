@@ -1,6 +1,6 @@
 {
   "name": "nuvio-manager",
-  "version": "0.2.20",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1407,4 +1407,6 @@ export default {
   "Les profils ayant déjà cet addon verront leur mode mis à jour. Une sauvegarde est créée par profil.": "I profili che usano già questo addon avranno la modalità aggiornata. Viene creato un backup per profilo.",
   "Glissez les addons pour définir leur ordre d’ajout.": "Trascina gli addon per definirne l'ordine di aggiunta.",
   "Modifiez le mode de chaque profil puis enregistrez.": "Cambia la modalità di ogni profilo, poi salva.",
+  "À propos de ce classement": "Informazioni su questa classifica",
+  "Seuls les addons configurés avec un proxy (interne ou externe) sont comptabilisés.": "Vengono conteggiati solo gli addon configurati con un proxy (interno o esterno).",
 };

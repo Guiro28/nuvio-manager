@@ -1984,9 +1984,7 @@ run(async () => {
     const v = await (await fetch("/api/version")).json();
     const el = $("#app-version");
     if (!el || !v) return;
-    const label = [v.version && "v" + v.version, v.build && "build " + v.build]
-      .filter(Boolean)
-      .join(" · ");
+    const label = v.version ? "v" + v.version : "";
     if (label) el.textContent = label;
     if (v.sha) {
       el.href = `${v.repoUrl}/commit/${v.sha}`;
