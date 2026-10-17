@@ -32,7 +32,7 @@ import {
   copyPaths,
   vault,
 } from "./core.js";
-import { call, rpc, profile, profileList, backend, providerOf, PROVIDERS, iptvPlaylists, pushIptvPlaylists, radarFollows, pushRadar, radarSearch, collections, pushCollections, homeCatalogSettings, pushHomeCatalogSettings, catalogSources } from "./nuvio.js";
+import { call, rpc, profile, profileList, backend, providerOf, PROVIDERS, iptvPlaylists, pushIptvPlaylists, radarFollows, pushRadar, radarSearch, collections, pushCollections, homeCatalogSettings, pushHomeCatalogSettings, catalogSources, catalogItems } from "./nuvio.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const host = process.env.HOST || "127.0.0.1",
@@ -800,6 +800,27 @@ const addonManifestKey = (url) => {
   }
   try { return normalizeManifestUrl(url); } catch { return String(url || ""); }
 };
+// Manifest logo for a profile's installed addon, for the Addons editor. Reuses a
+// relay grant's logo or a library entry (no network), otherwise reads it from the
+// manifest once and caches it for an hour. LAN/private hosts return null (the
+// readManifestLogo SSRF guard rejects them) → first-letter badge client-side.
+const addonLogoCache = new Map(); // manifestKey -> { logo, at }
+async function resolveAddonLogo(url) {
+  const ref = addonProxy.describe(url);
+  if (ref?.logo) return ref.logo;
+  let key;
+  try { key = addonManifestKey(url); } catch { key = String(url || ""); }
+  const lib = state.library.find((item) => { try { return addonManifestKey(item.url) === key; } catch { return false; } });
+  if (lib?.logo) return lib.logo;
+  const cached = addonLogoCache.get(key);
+  if (cached && Date.now() - cached.at < 3600_000) return cached.logo;
+  const raw = await readManifestLogo(key).catch(() => null);
+  // A manifest with no logo/icon makes readManifestLogo echo the manifest URL —
+  // that's not an image, so treat it as "no logo".
+  const logo = raw && raw !== key ? raw : null;
+  addonLogoCache.set(key, { logo, at: Date.now() });
+  return logo;
+}
 const writableList = (rows) =>
   rows.map((r, i) => ({
     url: normalizeUrl(r.url),
@@ -1465,6 +1486,22 @@ const server = http.createServer(async (req, res) => {
         // or the official site. The empty list is surfaced as-is to the client.
         return json(res, { provider: providerOf(a.provider).id, home, collections: cols, catalogs });
       }
+      if (route === "/api/catalog-preview") {
+        // First items (+ posters) of one catalog, for the home "Aperçu" view.
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        const a = account(url.searchParams.get("accountId"));
+        const profileId = Number(url.searchParams.get("profileId"));
+        await assertProfile(a.id, profileId);
+        const addonId = url.searchParams.get("addonId") || "";
+        const type = url.searchParams.get("type") || "";
+        const catalogId = url.searchParams.get("catalogId") || "";
+        const genre = url.searchParams.get("genre") || "";
+        const sources = await catalogSources(await token(a), profileId, a.provider).catch(() => []);
+        const addon = sources.find((source) => source.addonId === addonId);
+        assert(addon?.addonBaseUrl, "Catalogue introuvable", 404);
+        const items = await catalogItems(addon.addonBaseUrl, type, catalogId, genre).catch(() => []);
+        return json(res, { items });
+      }
       if (route === "/api/collections/save") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
         const a = account(b.accountId);
@@ -1769,6 +1806,11 @@ const server = http.createServer(async (req, res) => {
         const data = await profile(await token(a), profileId, a.provider);
         // Revoke relay grants whose addon is no longer in the profile's list.
         addonProxy.reconcile(a.id, profileId, (data.addons || []).map((x) => x.url));
+        // Attach each addon's manifest logo (for the profile Addons editor):
+        // prefer what we already have (relay grant logo / matching library entry),
+        // otherwise read it from the manifest once (cached 1h). LAN/private addons
+        // return null (SSRF guard) and fall back to the first-letter badge.
+        await Promise.all((data.addons || []).map(async (row) => { row.logo = await resolveAddonLogo(row.url); }));
         return json(res, data);
       }
       if (route === "/api/profile/identity") {

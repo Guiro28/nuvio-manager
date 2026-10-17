@@ -133,6 +133,103 @@ export async function renderCollections(container, context) {
     });
   }
 
+  // ── Aperçu des catalogues (lecture seule, façon accueil Nuvio) ─────────────
+  let previewOn = false;
+  function togglePreview() {
+    previewOn = !previewOn;
+    const list = container.querySelector("#col-home-list");
+    const hide = container.querySelector(".col-hide");
+    const area = container.querySelector("#col-preview-area");
+    const button = container.querySelector("#col-home-preview");
+    if (list) list.hidden = previewOn;
+    if (hide) hide.hidden = previewOn;
+    area.hidden = !previewOn;
+    if (button) button.classList.toggle("active", previewOn);
+    if (previewOn) paintPreview();
+  }
+  function paintPreview() {
+    const area = container.querySelector("#col-preview-area");
+    const enabled = home.items.filter((item) => item.enabled);
+    if (!enabled.length) {
+      area.innerHTML = `<p class="empty-inline">${esc(t("Aucun catalogue activé sur l’accueil."))}</p>`;
+      return;
+    }
+    area.innerHTML = enabled
+      .map((item, index) => {
+        let title;
+        if (item.is_collection) title = collectionById(item.collection_id)?.title || t("Collection");
+        else {
+          const info = resolveCatalog(item.addon_id, item.type, item.catalog_id);
+          title = item.custom_title?.trim() || info.catalogName;
+        }
+        return `<div class="col-preview-row"><div class="col-preview-head"><div class="col-preview-title">${esc(title)}</div><div class="col-preview-nav"><button type="button" data-scroll="-1" aria-label="${esc(t("Faire défiler vers la gauche"))}">‹</button><button type="button" data-scroll="1" aria-label="${esc(t("Faire défiler vers la droite"))}">›</button></div></div><div class="col-preview-strip" data-strip="${index}"><span class="muted">${esc(t("Chargement…"))}</span></div></div>`;
+      })
+      .join("");
+    area.querySelectorAll(".col-preview-row").forEach((row) => {
+      const strip = row.querySelector(".col-preview-strip");
+      row.querySelectorAll("[data-scroll]").forEach(
+        (button) => (button.onclick = () => strip.scrollBy({ left: Number(button.dataset.scroll) * strip.clientWidth * 0.85, behavior: "smooth" })),
+      );
+    });
+    enabled.forEach((item, index) => loadPreviewStrip(area.querySelector(`[data-strip="${index}"]`), item));
+  }
+  const renderPosters = (strip, items) => {
+    strip.innerHTML = items
+      .map(
+        (meta) =>
+          `<figure class="col-poster" title="${esc(meta.name)}">${meta.poster ? `<img src="${esc(meta.poster)}" alt="${esc(meta.name)}" loading="lazy" referrerpolicy="no-referrer">` : `<span class="col-poster-fallback">${esc((meta.name || "?").slice(0, 1).toUpperCase())}</span>`}<figcaption>${esc(meta.name)}</figcaption></figure>`,
+      )
+      .join("");
+    strip.querySelectorAll("img").forEach((image) =>
+      image.addEventListener(
+        "error",
+        () => {
+          const fallback = document.createElement("span");
+          fallback.className = "col-poster-fallback";
+          fallback.textContent = (image.alt || "?").slice(0, 1).toUpperCase();
+          image.replaceWith(fallback);
+        },
+        { once: true },
+      ),
+    );
+  };
+  const fetchCatalog = async (addonId, type, catalogId, genre) => {
+    try {
+      const params = new URLSearchParams({ accountId, profileId, addonId, type, catalogId });
+      if (genre && genre !== "None") params.set("genre", genre);
+      const { items } = await api(`catalog-preview?${params}`);
+      return items || [];
+    } catch {
+      return [];
+    }
+  };
+  async function loadPreviewStrip(strip, item) {
+    if (!strip) return;
+    let items;
+    if (item.is_collection) {
+      // A collection shows its own images: the cover image of each of its folders.
+      const collection = collectionById(item.collection_id);
+      items = (collection?.folders || [])
+        .filter((folder) => folder.coverImageUrl)
+        .map((folder) => ({ id: folder.id, name: folder.title || collection.title || "", poster: folder.coverImageUrl }));
+      if (!items.length) {
+        strip.innerHTML = `<span class="muted">${esc(t("Cette collection n’a pas d’image."))}</span>`;
+        return;
+      }
+      strip.classList.add("covers"); // collection covers use wider landscape tiles
+    } else {
+      const addon = addonById.get(item.addon_id);
+      const catalog = addon?.catalogs.find((entry) => entry.type === item.type && entry.id === item.catalog_id);
+      const genre = catalog?.genreRequired ? (catalog.genreOptions || [])[0] || "" : "";
+      items = await fetchCatalog(item.addon_id, item.type, item.catalog_id, genre);
+    }
+    if (!items.length) {
+      strip.innerHTML = `<span class="muted">${esc(t("Aperçu indisponible."))}</span>`;
+      return;
+    }
+    renderPosters(strip, items);
+  }
+
   // ── Collections ──────────────────────────────────────────────────────────
   const sourceLabel = (source) => {
     if (source.provider === "tmdb") return `TMDB · ${source.title || source.tmdbSourceType || ""}`;
@@ -500,11 +597,12 @@ export async function renderCollections(container, context) {
   container.innerHTML = `
     <div class="settings-top"><p class="muted">${esc(t("Organisez l’accueil et vos collections, comme dans l’application. Les changements rejoignent vos appareils à la prochaine synchronisation."))}</p></div>
     <section class="panel col-panel">
-      <div class="col-panel-head"><div><h3>${esc(t("Catalogues d’accueil"))}</h3><p class="muted">${esc(t("Une ligne par catalogue, dans l’ordre de l’accueil."))}</p></div>${homeEmpty ? "" : `<button id="col-home-save" class="primary">${esc(t("Enregistrer l’ordre"))}</button>`}</div>
+      <div class="col-panel-head"><div><h3>${esc(t("Catalogues d’accueil"))}</h3><p class="muted">${esc(t("Une ligne par catalogue, dans l’ordre de l’accueil."))}</p></div>${homeEmpty ? "" : `<div class="actions"><button id="col-home-preview">${esc(t("Aperçu"))}</button><button id="col-home-save" class="primary">${esc(t("Enregistrer l’ordre"))}</button></div>`}</div>
       ${homeEmpty
         ? `<p class="col-warn">${esc(t("Aucun réglage d’accueil synchronisé pour ce profil. Organisez l’ordre des catalogues depuis l’application Nuvio ou le site officiel, puis rechargez cette page."))}</p>`
         : `<label class="check-label col-hide"><input type="checkbox" id="col-hide-unreleased" ${home.hide ? "checked" : ""}>${esc(t("Masquer les contenus non encore sortis"))}</label>
-      <div id="col-home-list" class="col-home-list"></div>`}
+      <div id="col-home-list" class="col-home-list"></div>
+      <div id="col-preview-area" class="col-preview-area" hidden></div>`}
     </section>
     <section class="panel col-panel">
       <div class="col-panel-head"><div><h3>${esc(t("Collections"))}</h3><p class="muted">${esc(t("Rangées personnalisées : dossiers et sources."))}</p></div><div class="actions"><button id="col-new-btn">${esc(t("＋ Collection"))}</button><button id="col-save" class="primary">${esc(t("Enregistrer les collections"))}</button></div></div>
@@ -514,6 +612,7 @@ export async function renderCollections(container, context) {
   const hideToggle = container.querySelector("#col-hide-unreleased");
   if (hideToggle) hideToggle.onchange = (event) => (home.hide = event.target.checked);
   container.querySelector("#col-home-save")?.addEventListener("click", saveHome);
+  container.querySelector("#col-home-preview")?.addEventListener("click", togglePreview);
   container.querySelector("#col-new-btn").onclick = createCollection;
   container.querySelector("#col-save").onclick = saveCollections;
   if (!homeEmpty) paintHome();

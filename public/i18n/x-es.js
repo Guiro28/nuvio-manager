@@ -1409,4 +1409,8 @@ export default {
   "Modifiez le mode de chaque profil puis enregistrez.": "Cambia el modo de cada perfil y luego guarda.",
   "À propos de ce classement": "Acerca de esta clasificación",
   "Seuls les addons configurés avec un proxy (interne ou externe) sont comptabilisés.": "Solo se cuentan los addons configurados con un proxy (interno o externo).",
+  "Aperçu": "Vista previa",
+  "Aucun catalogue activé sur l’accueil.": "Ningún catálogo activado en el inicio.",
+  "Aperçu indisponible.": "Vista previa no disponible.",
+  "Cette collection n’a pas d’image.": "Esta colección no tiene imagen.",
 };

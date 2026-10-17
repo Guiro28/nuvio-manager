@@ -1424,4 +1424,8 @@ export default {
   "Modifiez le mode de chaque profil puis enregistrez.": "Change the mode for each profile, then save.",
   "À propos de ce classement": "About this ranking",
   "Seuls les addons configurés avec un proxy (interne ou externe) sont comptabilisés.": "Only addons configured with a proxy (internal or external) are counted.",
+  "Aperçu": "Preview",
+  "Aucun catalogue activé sur l’accueil.": "No catalog enabled on the home screen.",
+  "Aperçu indisponible.": "Preview unavailable.",
+  "Cette collection n’a pas d’image.": "This collection has no image.",
 };

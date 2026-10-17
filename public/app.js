@@ -853,6 +853,17 @@ function integrationsEditor() {
       current.identity[
         kind === "addons" ? "uses_primary_addons" : "uses_primary_plugins"
       ];
+  // Manifest logo per addon (addons only), keyed by normalized URL. Kept aside
+  // from `rows` because `rows` is the payload sent back to the backend (no logo).
+  const logoByUrl = kind === "addons"
+    ? Object.fromEntries(
+        (current.addons || []).map((r) => {
+          let key = r.url;
+          try { key = new URL(r.url).href; } catch {}
+          return [key, r.logo || ""];
+        }),
+      )
+    : {};
   $("#settings").innerHTML =
     `<div class="settings-top"><p class="muted">${rows.length} ${kind} · ${esc(t("ordre de synchronisation"))}</p><div class="actions">${btn(t("＋ Ajouter"), "add-integration")}${btn(t("Voir les changements"), "save-list", "primary")}</div></div>${inherited ? `<div class="hint warning">${esc(t("Ce profil utilise la liste du profil principal. Modifie l’héritage dans l’onglet Profil pour gérer sa propre liste."))}</div>` : ""}<div id="integration-list"></div>`;
   function display() {
@@ -860,9 +871,10 @@ function integrationsEditor() {
       rows
         .map(
           (r, i) =>
-            `<div class="addon"><div class="addon-top"><label class="check-label"><input type="checkbox" data-enabled="${i}" ${r.enabled ? "checked" : ""} ${inherited ? "disabled" : ""}>${esc(r.name || kind)}</label><div class="actions"><button data-up="${i}" ${i === 0 || inherited ? "disabled" : ""} aria-label="${esc(t("Monter {name}", { name: r.name }))}">↑</button><button data-down="${i}" ${i === rows.length - 1 || inherited ? "disabled" : ""} aria-label="${esc(t("Descendre {name}", { name: r.name }))}">↓</button><button data-remove="${i}" ${inherited ? "disabled" : ""}>${esc(t("Retirer"))}</button></div></div><p class="url">${esc(r.url)}</p></div>`,
+            `<div class="addon"><div class="addon-top"><label class="check-label"><input type="checkbox" data-enabled="${i}" ${r.enabled ? "checked" : ""} ${inherited ? "disabled" : ""}>${kind === "addons" ? addonLogoHtml({ name: r.name, logo: logoByUrl[r.url] }, "addon-logo-md") : ""}<span class="addon-row-meta"><span class="addon-name">${esc(r.name || kind)}</span>${kind === "addons" ? `<span class="url" title="${esc(r.url)}">${esc(r.url)}</span>` : ""}</span></label><div class="actions"><button data-up="${i}" ${i === 0 || inherited ? "disabled" : ""} aria-label="${esc(t("Monter {name}", { name: r.name }))}">↑</button><button data-down="${i}" ${i === rows.length - 1 || inherited ? "disabled" : ""} aria-label="${esc(t("Descendre {name}", { name: r.name }))}">↓</button><button data-remove="${i}" ${inherited ? "disabled" : ""}>${esc(t("Retirer"))}</button></div></div>${kind === "addons" ? "" : `<p class="url">${esc(r.url)}</p>`}</div>`,
         )
         .join("") || `<p class="empty-inline">${esc(t("Aucune intégration."))}</p>`;
+    $$("#integration-list .addon-logo img").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
     $$("[data-enabled]").forEach(
       (el) =>
         (el.onchange = () =>

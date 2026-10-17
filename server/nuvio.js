@@ -348,6 +348,55 @@ const catalogIsSearchOnly = (catalog) =>
     (entry) => String(entry?.name || entry || "").trim().toLowerCase() === "search" && Boolean(entry?.isRequired),
   );
 
+// Preview of a catalog's content (first items + posters), for the "Aperçu" view
+// of the home catalogs. Best-effort: cached + time-boxed like the manifest fetch.
+const catalogCache = new Map();
+const CATALOG_TTL_OK = 5 * 60 * 1000;
+const CATALOG_TTL_ERR = 60 * 1000;
+const validImage = (value) => {
+  try {
+    const url = new URL(String(value || ""));
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : "";
+  } catch {
+    return "";
+  }
+};
+export async function catalogItems(addonBaseUrl, type, catalogId, genre = "", limit = 15) {
+  const base = String(addonBaseUrl || "").replace(/\/?$/, "/");
+  const segment = genre && genre !== "None"
+    ? `catalog/${encodeURIComponent(type)}/${encodeURIComponent(catalogId)}/genre=${encodeURIComponent(genre)}.json`
+    : `catalog/${encodeURIComponent(type)}/${encodeURIComponent(catalogId)}.json`;
+  const url = base + segment;
+  const cached = catalogCache.get(url);
+  if (cached && cached.expires > Date.now()) {
+    if (cached.error) throw new Error(cached.error);
+    return cached.data;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MANIFEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { headers: { accept: "application/json" }, signal: controller.signal });
+    if (!response.ok) throw new Error(`Catalog ${response.status}`);
+    const data = await response.json();
+    const items = (Array.isArray(data.metas) ? data.metas : [])
+      .slice(0, limit)
+      .map((meta) => ({
+        id: String(meta.id || ""),
+        name: String(meta.name || meta.title || ""),
+        type: String(meta.type || type),
+        poster: validImage(meta.poster),
+      }));
+    catalogCache.set(url, { data: items, expires: Date.now() + CATALOG_TTL_OK });
+    return items;
+  } catch (error) {
+    const message = error.name === "AbortError" ? "Catalog timeout" : error.message;
+    catalogCache.set(url, { error: message, expires: Date.now() + CATALOG_TTL_ERR });
+    throw new Error(message);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function catalogSources(token, id, providerId = "nuvio") {
   const profiles = await rpc("sync_pull_profiles", {}, token, providerId);
   const identity = profiles.find((p) => p.profile_index === id);

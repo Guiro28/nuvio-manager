@@ -748,7 +748,7 @@ header {
 .lib-pick-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-drag { flex: 0 0 auto; cursor: grab; color: var(--text-muted); font-size: 1rem; line-height: 1; user-select: none; }
 .lib-pick.dragging { opacity: 0.5; background: var(--selected); }
-.addon-logo-sm {
+.addon-logo.addon-logo-sm {
   flex: 0 0 30px;
   width: 30px;
   height: 30px;
@@ -756,6 +756,30 @@ header {
   font-size: 0.85rem;
   font-weight: 700;
 }
+.addon-logo.addon-logo-md {
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+/* Fallback letter only shows without an image: hide it when a logo is present so
+   a transparent PNG doesn't reveal the letter behind it (the <img> is removed on
+   error, so the letter reappears as a true fallback). */
+.addon-logo:has(> img) > span { display: none; }
+.addon-row-meta { display: flex; flex-direction: column; gap: 2px; }
+.addon-row-meta .addon-name { font-weight: 600; }
+/* Addons editor: the name/URL column shrinks (flex 1 1 0 + min-width:0 on every
+   ancestor) so the long manifest URL ellipsises on its own line under the name,
+   instead of stretching the row and pushing the action buttons off-screen. */
+#integration-list .addon { overflow: hidden; }
+#integration-list .addon-top { min-width: 0; }
+#integration-list .check-label { flex: 1 1 0; min-width: 0; overflow: hidden; }
+#integration-list .addon-row-meta { flex: 1 1 0; min-width: 0; overflow: hidden; }
+#integration-list .addon-top .actions { flex: 0 0 auto; }
+#integration-list .addon-name,
+#integration-list .addon-row-meta .url { display: block; max-width: 100%; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-pick .avatar { position: relative; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; }
 .lib-pick .avatar-fallback { font-size: 0.85rem; }
 .assign-group { margin-bottom: 4px; }
@@ -2282,6 +2306,21 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .col-home-list{display:flex;flex-direction:column;gap:6px;}
 .col-home-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface);}
 .col-home-row.disabled{opacity:.5;}
+#col-home-preview.active{background:var(--selected);border-color:var(--purple);color:var(--purple);}
+.col-preview-area{display:flex;flex-direction:column;gap:18px;}
+.col-home-list[hidden],.col-preview-area[hidden],.col-hide[hidden]{display:none;}
+.col-preview-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}
+.col-preview-title{font-size:.95rem;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.col-preview-nav{display:flex;gap:6px;flex:none;}
+.col-preview-nav button{width:30px;height:30px;padding:0;line-height:1;font-size:1.1rem;}
+.col-preview-strip{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;padding:2px 2px 6px;scroll-snap-type:x proximity;scrollbar-width:none;-ms-overflow-style:none;}
+.col-preview-strip::-webkit-scrollbar{display:none;}
+.col-poster{flex:0 0 118px;width:118px;margin:0;scroll-snap-align:start;}
+.col-poster img,.col-poster-fallback{width:118px;height:177px;border-radius:9px;object-fit:cover;background:var(--selected);border:1px solid var(--border);display:block;}
+.col-poster-fallback{display:grid;place-items:center;color:var(--selected-ink);font-size:2rem;font-weight:700;}
+.col-poster figcaption{margin-top:6px;font-size:.78rem;line-height:1.25;color:var(--text-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.col-preview-strip.covers .col-poster{flex:0 0 256px;width:256px;}
+.col-preview-strip.covers .col-poster img,.col-preview-strip.covers .col-poster-fallback{width:256px;height:144px;}
 .col-home-grip{flex:none;color:var(--text-muted);font-size:.9rem;}
 .col-home-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
 .col-home-main strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;}

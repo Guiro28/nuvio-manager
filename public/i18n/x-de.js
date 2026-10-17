@@ -1409,4 +1409,8 @@ export default {
   "Modifiez le mode de chaque profil puis enregistrez.": "Ändere den Modus für jedes Profil und speichere dann.",
   "À propos de ce classement": "Über dieses Ranking",
   "Seuls les addons configurés avec un proxy (interne ou externe) sont comptabilisés.": "Nur Addons, die mit einem Proxy (intern oder extern) konfiguriert sind, werden gezählt.",
+  "Aperçu": "Vorschau",
+  "Aucun catalogue activé sur l’accueil.": "Kein Katalog auf der Startseite aktiviert.",
+  "Aperçu indisponible.": "Vorschau nicht verfügbar.",
+  "Cette collection n’a pas d’image.": "Diese Sammlung hat kein Bild.",
 };
