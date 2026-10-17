@@ -183,6 +183,30 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     return { mode: ref.mode, manifestUrl: grant.manifestUrl, name: grant.name, logo: grant.logo || "" };
   };
 
+  // Resolve a proxied addon's display logo from one of our relay URLs. Reuses the
+  // grant's stored logo; when empty (e.g. minted before we read `icon`, or the
+  // manifest only exposes `icon`), fetches the upstream manifest THROUGH the proxy
+  // — so geo-blocked addons resolve where a plain direct fetch would fail — and
+  // backfills the grant. `logoChecked` stops us re-fetching when there is no logo.
+  const resolveLogo = async (url) => {
+    const ref = relayRef(url);
+    if (!ref) return null;
+    const grant = getGrant(ref.token);
+    if (!grant) return null;
+    if (grant.logo) return grant.logo;
+    if (grant.logoChecked) return null;
+    try {
+      const meta = await fetchMeta(grant.manifestUrl, grant.mode || ref.mode, grant);
+      grant.logo = meta.logo || "";
+      grant.logoChecked = true;
+      save();
+      return grant.logo || null;
+    } catch (error) {
+      log.debug("proxy", "logo d’addon introuvable", { addon: grant.name || "", error: error.message });
+      return null;
+    }
+  };
+
   async function fetchMeta(manifestUrl, mode, item) {
     const { res } = await request(manifestUrl, {
       upstream: upstreamFor(mode, configuredProxy()),
@@ -194,7 +218,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     return {
       name: String(manifest.name || item.name || manifest.id),
       displayName: `${String(item.name || manifest.name || manifest.id)} (proxy)`,
-      logo: String(manifest.logo || item.logo || ""),
+      logo: String(manifest.logo || manifest.icon || item.logo || ""),
     };
   }
 
@@ -437,5 +461,5 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     }
   }
 
-  return { handle, register, status, test, metrics, openEvents, describe, revokeAccount, reconcile };
+  return { handle, register, status, test, metrics, openEvents, describe, resolveLogo, revokeAccount, reconcile };
 }

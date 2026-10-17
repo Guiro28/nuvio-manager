@@ -806,8 +806,11 @@ const addonManifestKey = (url) => {
 // readManifestLogo SSRF guard rejects them) → first-letter badge client-side.
 const addonLogoCache = new Map(); // manifestKey -> { logo, at }
 async function resolveAddonLogo(url) {
-  const ref = addonProxy.describe(url);
-  if (ref?.logo) return ref.logo;
+  // Proxied addon (relay URL): resolve through the proxy, which reuses the grant's
+  // logo or reads the upstream manifest (logo||icon) via the configured proxy — a
+  // direct read would fail for the geo-blocked addons that are proxied in the first
+  // place. The grant is backfilled, so it stays a no-op afterwards.
+  if (addonProxy.describe(url)) return (await addonProxy.resolveLogo(url).catch(() => null)) || null;
   let key;
   try { key = addonManifestKey(url); } catch { key = String(url || ""); }
   const lib = state.library.find((item) => { try { return addonManifestKey(item.url) === key; } catch { return false; } });
