@@ -81,7 +81,7 @@ const passthroughHeaders = [
   "etag",
 ];
 
-export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl, getProxyUrl }) {
+export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl, getProxyUrl, getProfileLabel }) {
   const configuredOrigin = () => getOrigin ? getOrigin() : origin;
   const configuredProxy = () => getProxyUrl
     ? getProxyUrl()
@@ -151,7 +151,14 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
       manifest: grant.manifestUrl,
       mode,
     });
-    log.info("proxy", "flux ouvert", { addon: grant.name || "", mode, ref: `${grant.accountId}:${grant.profileId ?? ""}` });
+    const ref = `${grant.accountId}:${grant.profileId ?? ""}`;
+    const info = getProfileLabel?.(ref) || null;
+    log.info("proxy", "flux ouvert", {
+      addon: grant.name || "",
+      mode,
+      profile: info?.profileName || "",
+      ref,
+    });
     const cutoff = Date.now() - OPENS_RETENTION_MS;
     if (state.addonOpens.length > OPENS_MAX || (state.addonOpens[0] && state.addonOpens[0].at < cutoff))
       state.addonOpens = state.addonOpens.filter((e) => e.at >= cutoff).slice(-OPENS_MAX);

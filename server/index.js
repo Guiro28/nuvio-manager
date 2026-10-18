@@ -272,6 +272,9 @@ const addonProxy = createIntegratedProxy({
   save,
   getOrigin: publicOrigin,
   getProxyUrl: effectiveProxyUrl,
+  // Resolve a profile's display name for logs (historyStore is defined later, so
+  // this is a lazy getter, only called at runtime when a stream opens).
+  getProfileLabel: (ref) => historyStore.profileLabel(ref),
 });
 const saveSessions = () =>
   db.write("sessions", {

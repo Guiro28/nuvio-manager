@@ -379,6 +379,13 @@ export function createHistoryStore({
     if (changed) save(store);
   }
 
+  // Light display lookup for logs/UI: the stored names of a mirrored profile by
+  // its "accountId:profileId" ref, or null when it has not been mirrored yet.
+  function profileLabel(ref) {
+    const p = store.profiles[String(ref)];
+    return p ? { profileName: p.profileName || "", accountName: p.accountName || "" } : null;
+  }
+
   function status() {
     return {
       enabled: isEnabled(),
@@ -432,6 +439,7 @@ export function createHistoryStore({
     getActivity,
     getAddonUsage,
     pruneAccount,
+    profileLabel,
     status,
   };
 }
