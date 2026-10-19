@@ -11,3 +11,6 @@ reference-public/
 
 .claude/
 /nuvio_logo.png
+
+# Local demo kit (anonymised fixtures built from a real instance) — never commit
+.demo/
