@@ -30,6 +30,7 @@ function harness({ type = "movie", contentId = "tt1160419", firstRangeStart = 0,
     openConns: 1,
     bytes: 50 * MB,
     firstRangeStart,
+    rangeLog: [{ at: clock, start: firstRangeStart }],
     rate: 40e6,
     series: [],
   };
@@ -152,6 +153,74 @@ test("a source cut is a stop only when the player never comes back", async () =>
   assert.equal(h.item().state, "playing"); // the player usually reconnects quickly
   await h.advance(35000);
   assert.equal(h.item().state, "stopped");
+});
+
+test("a resume that reads the header first starts at the saved position, not 0", async () => {
+  // Nuvio saved 1 h of a 2 h 46 film; the player reads the header (offset 0),
+  // the index at the very end, then jumps ~36 % into the file.
+  const h = harness({
+    progress: [{ content_id: "tt1160419", position: 3_600_000, duration: 9_960_000, last_watched: 500_000 }],
+  });
+  const total = h.session.total;
+  h.session.rangeLog.push({ at: h.now() + 300, start: total - 2e6 }); // index read at the end
+  h.session.rangeLog.push({ at: h.now() + 1500, start: Math.round(total * 0.3614) }); // jump
+  h.session.requests += 2;
+  await h.advance(15000);
+  const item = h.item();
+  assert.equal(item.state, "playing");
+  assert.equal(item.position, 3_600_000 + 15000 - 1500);
+});
+
+test("without saved progress a resume jump is placed from the byte offset", async () => {
+  const h = harness();
+  const total = h.session.total;
+  h.session.rangeLog.push({ at: h.now() + 1000, start: Math.round(total * 0.5) });
+  await h.advance(5000);
+  assert.equal(h.item().position, null); // duration not known yet
+  // First Nuvio push (a pause) gives the duration and the exact position.
+  h.tables.progress = [{ content_id: "tt1160419", position: 5_000_000, duration: 9_960_000, last_watched: h.now() }];
+  await h.advance(15000);
+  assert.equal(h.item().state, "paused");
+  assert.equal(h.item().position, 5_000_000);
+});
+
+test("the same stream reopened after a stop comes back to playing at the exit position", async () => {
+  const h = harness();
+  await h.advance(15000);
+  h.session.openConns = 0;
+  h.session.lastClientCloseAt = h.now();
+  h.session.lastCloseAt = h.now();
+  h.tables.progress = [{ content_id: "tt1160419", position: 2_400_000, duration: 9_960_000, last_watched: h.now() }];
+  await h.advance(20000);
+  assert.equal(h.item().state, "stopped");
+  assert.equal(h.item().position, 2_400_000);
+  // Two minutes later Nuvio reuses the last link: same session, new request.
+  await h.advance(120000);
+  h.session.openConns = 1;
+  h.session.requests++;
+  h.session.lastRequestAt = h.now();
+  h.session.rangeLog.push({ at: h.now(), start: 0 }); // header first
+  await h.advance(10000);
+  const item = h.item();
+  assert.equal(item.state, "playing");
+  assert.equal(item.position, 2_400_000 + 10000);
+});
+
+test("a completed title reopened from the start plays from 0", async () => {
+  const h = harness();
+  await h.advance(15000);
+  h.session.openConns = 0;
+  h.session.lastClientCloseAt = h.now();
+  h.tables.progress = [{ content_id: "tt1160419", position: 9_700_000, duration: 9_960_000, last_watched: h.now() }];
+  await h.advance(20000);
+  assert.equal(h.item().state, "completed");
+  await h.advance(60000);
+  h.session.openConns = 1;
+  h.session.requests++;
+  h.session.lastRequestAt = h.now();
+  await h.advance(5000);
+  assert.equal(h.item().state, "playing");
+  assert.equal(h.item().position, 5000);
 });
 
 test("a reconnect inside the grace window is not a stop", async () => {

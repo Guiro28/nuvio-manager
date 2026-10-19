@@ -256,6 +256,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         openConns: 0,
         bytes: 0,
         firstRangeStart: null,
+        rangeLog: [], // last requests { at, start } — header read, then the jump to the resume point
         buckets: new Map(), // epoch second -> bytes
       };
       sessions.set(hash, session);
@@ -547,6 +548,8 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
           session.openConns++;
           const rangeStart = Number(/bytes=(\d+)-/i.exec(req.headers.range || "")?.[1] || 0);
           if (session.firstRangeStart == null) session.firstRangeStart = rangeStart;
+          session.rangeLog.push({ at: session.lastRequestAt, start: rangeStart });
+          if (session.rangeLog.length > 20) session.rangeLog.shift();
           res.on("close", () => {
             session.openConns = Math.max(0, session.openConns - 1);
             session.lastCloseAt = Date.now();
