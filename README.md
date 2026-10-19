@@ -4,6 +4,53 @@ Dashboard auto-hébergé pour gérer plusieurs comptes et profils [Nuvio](https:
 
 > Projet communautaire indépendant, non affilié à Nuvio ni à Tuvora.
 
+## Aperçu
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/accueil.png"><img src="docs/screenshots/accueil.png" alt="Accueil"></a>
+      <br><sub><b>Accueil</b> — système, historique CPU/RAM, trafic du proxy et vue d’ensemble de l’instance.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/cloner-profil.png"><img src="docs/screenshots/cloner-profil.png" alt="Cloner un profil"></a>
+      <br><sub><b>Clonage</b> — copie complète ou partielle d’un profil vers un autre, y compris entre comptes.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/bibliotheque-addons.png"><img src="docs/screenshots/bibliotheque-addons.png" alt="Bibliothèque d’addons"></a>
+      <br><sub><b>Bibliothèque d’addons</b> — chaque addon avec les profils qui l’utilisent.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/bibliotheque-modes-proxy.png"><img src="docs/screenshots/bibliotheque-modes-proxy.png" alt="Modes de proxy par profil"></a>
+      <br><sub><b>Proxy par profil</b> — sans proxy, proxy interne ou externe (WARP), modifiables d’un coup.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/statistiques.png"><img src="docs/screenshots/statistiques.png" alt="Statistiques et lectures en cours"></a>
+      <br><sub><b>Statistiques</b> — lectures en cours en direct (release, débit), activité quotidienne et classements.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/screenshots/profil-identite.png"><img src="docs/screenshots/profil-identite.png" alt="Identité du profil"></a>
+      <br><sub><b>Profils</b> — identité, couleur et avatars Nuvio ou Xperience.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <a href="docs/screenshots/profil-sources-suivi.png"><img src="docs/screenshots/profil-sources-suivi.png" alt="Sources de suivi du profil"></a>
+      <br><sub><b>Sources de suivi</b> — Trakt et Simkl associés par profil, historique Nuvio inclus ou non dans les statistiques.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <a href="docs/screenshots/catalogues-apercu.jpg"><img src="docs/screenshots/catalogues-apercu.jpg" alt="Aperçu des catalogues d’accueil" width="50%"></a>
+      <br><sub><b>Catalogues & collections</b> — aperçu de l’accueil tel qu’il s’affiche dans l’application.</sub>
+    </td>
+  </tr>
+</table>
+
 ## Fonctionnalités
 
 ### Comptes & profils
