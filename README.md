@@ -51,8 +51,6 @@ Dashboard auto-hébergé pour gérer plusieurs comptes et profils [Nuvio](https:
   </tr>
 </table>
 
-<sub>Captures réalisées avec des données de démonstration anonymisées.</sub>
-
 ## Fonctionnalités
 
 ### Comptes & profils
