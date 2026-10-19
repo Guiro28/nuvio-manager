@@ -31,6 +31,7 @@ function harness({ type = "movie", contentId = "tt1160419", firstRangeStart = 0,
     bytes: 50 * MB,
     firstRangeStart,
     rangeLog: [{ at: clock, start: firstRangeStart }],
+    gaps: [],
     rate: 40e6,
     series: [],
   };
@@ -94,17 +95,34 @@ test("a Nuvio push with a new range request is a seek, not a pause", async () =>
   assert.ok(item.position >= 3_000_000);
 });
 
-test("bytes coming back after a quiet pause resume playback", async () => {
+test("a burst after the pause means playback resumed, dated back by the usual drain time", async () => {
+  const h = harness();
+  // Steady playback: the player reloads after ~40 s silences (its buffer drain).
+  h.session.gaps.push({ start: h.now() + 40000, end: h.now() + 80000 }, { start: h.now() + 100000, end: h.now() + 140000 });
+  await h.advance(150000);
+  h.tables.progress = [{ content_id: "tt1160419", position: 600_000, duration: 9_960_000, last_watched: h.now() }];
+  await h.advance(15000);
+  assert.equal(h.item().state, "paused");
+  const pausedAt = h.now() - 15000;
+  // Short pause: resumed ~10 s later; the player reloads ~40 s after that.
+  await h.advance(45000);
+  assert.equal(h.item().state, "paused"); // nothing visible yet (full buffer)
+  h.session.gaps.push({ start: pausedAt - 5000, end: h.now() });
+  await h.advance(5000);
+  const item = h.item();
+  assert.equal(item.state, "playing");
+  // resumed ≈ reload (now - 5 s) - 40 s drain → 600 000 + (5 000 + 40 000)
+  assert.equal(item.position, 600_000 + 45_000);
+});
+
+test("a paused player's full buffer (no reload) stays paused, never stopped", async () => {
   const h = harness();
   await h.advance(15000);
   h.tables.progress = [{ content_id: "tt1160419", position: 600_000, duration: 9_960_000, last_watched: h.now() }];
   await h.advance(15000);
+  await h.advance(20 * 60 * 1000); // 20 min paused, connection idle
   assert.equal(h.item().state, "paused");
-  await h.advance(25000); // quiet period, buffer full while paused
-  h.session.bytes += 4 * MB; // playback drained the buffer, refill starts
-  h.session.lastByteAt = h.now();
-  await h.advance(5000);
-  assert.equal(h.item().state, "playing");
+  assert.equal(h.item().position, 600_000);
 });
 
 test("the player hanging up is a stop after the grace window, completed at ≥ 90 %", async () => {
@@ -144,15 +162,19 @@ test("a resumed playback takes its starting point from the saved progress", asyn
   assert.equal(item.position, 3_600_000 + 15000);
 });
 
-test("a source cut is a stop only when the player never comes back", async () => {
+test("a source cut is not a stop: the player reconnects when it needs data", async () => {
   const h = harness();
   await h.advance(15000);
   h.session.openConns = 0;
   h.session.lastUpstreamFailAt = h.now();
-  await h.advance(30000);
-  assert.equal(h.item().state, "playing"); // the player usually reconnects quickly
-  await h.advance(35000);
-  assert.equal(h.item().state, "stopped");
+  h.session.lastByteAt = h.now();
+  await h.advance(5 * 60 * 1000); // player drains its buffer meanwhile
+  assert.equal(h.item().state, "playing");
+  h.session.openConns = 1;
+  h.session.requests++;
+  h.session.lastRequestAt = h.now();
+  await h.advance(5000);
+  assert.equal(h.item().state, "playing");
 });
 
 test("a resume that reads the header first starts at the saved position, not 0", async () => {

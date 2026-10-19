@@ -11,13 +11,15 @@
 //   minutes (the player is draining a large buffer).
 // - Nuvio update + a new range request since the previous poll → seek, still
 //   playing. Nuvio update without a new request → paused at that exact position.
-// - After a pause: bytes coming back after a quiet period, a long continuous flow
-//   or a new request → playing again (detection can lag behind the real resume).
+// - After a pause: a paused player never reloads once its buffer is full, so any
+//   burst of bytes after a silence (or a new request) means playback resumed.
+//   Nuvio pushes nothing on resume and the player only reloads once its buffer
+//   drained, so the resume time is moved back by this player's usual silence
+//   between bursts while it was playing.
 // - The player hung up and did not reconnect within a grace window → stopped
-//   (completed when Nuvio shows ≥ 90 % or marks the title watched).
-// - The source dropped the transfer and the player did not reconnect within 60 s
-//   → stopped. Safety nets: no bytes for 15 min while "playing", or paused for
-//   3 h → stopped.
+//   (completed when Nuvio shows ≥ 90 % or marks the title watched). A source cut
+//   is not a stop: the player reconnects when it needs data.
+// - Safety nets: no bytes for 15 min while "playing", or paused for 3 h → stopped.
 //
 // Nuvio is only queried for profiles that have a live session (every 15 s), plus
 // confirmation reads right after a stop. Positions are in milliseconds.
@@ -25,15 +27,14 @@
 const TICK_MS = 5000;
 const POLL_MS = 15000;
 const STOP_GRACE_MS = 15000;
-const UPSTREAM_FAIL_MS = 60000;
 const CONFIRM_DELAYS_MS = [0, 15000];
 const LOST_PLAYING_MS = 15 * 60 * 1000;
 const LOST_PAUSED_MS = 3 * 3600 * 1000;
 const SHOW_STOPPED_MS = 5 * 60 * 1000;
-const RESUME_QUIET_MS = 20000;
-const RESUME_BYTES = 1024 * 1024;
-const RESUME_FLOW_MS = 90000;
-const RESUME_FLOW_BYTES = 8 * 1024 * 1024;
+// Silences used to learn the player's buffer-drain time: only those during
+// steady playback (not the initial buffering), the last few, median.
+const DRAIN_SKIP_START_MS = 30000;
+const DRAIN_SAMPLES = 5;
 const COMPLETE_RATIO = 0.9;
 // No Nuvio answer this long after the start (network, unknown title): assume 0.
 const START_GUESS_MS = 20000;
@@ -115,9 +116,7 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
         polledAt: 0,
         pollRequests: s.requests,
         pausedAt: 0,
-        pausedBytes: 0,
         pausedRequests: 0,
-        quietBytes: null,
         stoppedAt: 0,
         stopReason: "",
         confirmAt: [],
@@ -150,10 +149,24 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
     log?.info?.("lecture", "lecture arrêtée", { session: s.id, reason, ref: `${s.accountId}:${s.profileId}` });
   };
 
-  const resume = (track, s, reason) => {
+  // How long this player stays silent between two bursts while playing — the
+  // time it takes to drain its buffer down to its reload threshold (median of
+  // the last silences of steady playback before the pause, 0 if none seen).
+  const drainTime = (s, track) => {
+    const silences = (s.gaps || [])
+      .filter((g) => g.start >= s.startedAt + DRAIN_SKIP_START_MS && g.end <= track.pausedAt)
+      .slice(-DRAIN_SAMPLES)
+      .map((g) => g.end - g.start)
+      .sort((a, b) => a - b);
+    return silences.length ? silences[Math.floor(silences.length / 2)] : 0;
+  };
+
+  // Playback resumed; seenAt = when the relay saw the player reload. The player
+  // only reloads once its buffer drained, so the real resume was about one usual
+  // silence earlier (never before the pause).
+  const resume = (track, s, reason, seenAt) => {
     track.state = "playing";
-    track.anchorAt = now();
-    track.quietBytes = null;
+    track.anchorAt = Math.max(track.pausedAt, Math.min(now(), seenAt) - drainTime(s, track));
     log?.debug?.("lecture", "reprise détectée", { session: s.id, reason });
   };
 
@@ -212,7 +225,6 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
     track.stoppedAt = 0;
     track.stopReason = "";
     track.confirmAt = [];
-    track.quietBytes = null;
     track.pollRequests = s.requests;
     track.polledAt = 0;
     log?.info?.("lecture", "lecture reprise", { session: s.id, ref: `${s.accountId}:${s.profileId}` });
@@ -232,30 +244,17 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
         t - s.lastClientCloseAt >= STOP_GRACE_MS
       )
         return stop(track, s, s.lastClientCloseAt, "closed");
-      // The source dropped the transfer and the player never came back.
-      if (
-        s.openConns === 0 &&
-        s.lastUpstreamFailAt &&
-        s.lastUpstreamFailAt >= s.lastRequestAt &&
-        t - s.lastUpstreamFailAt >= UPSTREAM_FAIL_MS
-      )
-        return stop(track, s, s.lastUpstreamFailAt, "upstream");
       if (track.state === "playing" && t - Math.max(s.lastByteAt, s.lastRequestAt) >= LOST_PLAYING_MS)
         return stop(track, s, Math.max(s.lastByteAt, s.lastRequestAt), "lost");
       if (track.state === "paused" && t - track.pausedAt >= LOST_PAUSED_MS)
         return stop(track, s, t, "lost");
     }
     if (track.state === "paused") {
-      if (s.requests > track.pausedRequests) return resume(track, s, "request");
-      if (t - s.lastByteAt >= RESUME_QUIET_MS) track.quietBytes ??= s.bytes;
-      if (track.quietBytes != null && s.bytes - track.quietBytes >= RESUME_BYTES) return resume(track, s, "bytes");
-      if (
-        track.quietBytes == null &&
-        t - track.pausedAt >= RESUME_FLOW_MS &&
-        s.bytes - track.pausedBytes >= RESUME_FLOW_BYTES &&
-        t - s.lastByteAt < TICK_MS
-      )
-        return resume(track, s, "flow");
+      // The player re-requested the media, or reloaded after a silence: a
+      // paused player does neither once its buffer is full.
+      if (s.requests > track.pausedRequests) return resume(track, s, "request", s.lastRequestAt);
+      const reload = (s.gaps || []).find((g) => g.end > track.pausedAt);
+      if (reload) return resume(track, s, "bytes", reload.end);
     }
   };
 
@@ -333,9 +332,7 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
     }
     track.state = "paused";
     track.pausedAt = at;
-    track.pausedBytes = s.bytes;
     track.pausedRequests = s.requests;
-    track.quietBytes = null;
     log?.debug?.("lecture", "pause détectée", { session: s.id, position });
   };
 

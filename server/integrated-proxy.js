@@ -266,14 +266,23 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         bytes: 0,
         firstRangeStart: null,
         rangeLog: [], // last requests { at, start } — header read, then the jump to the resume point
+        gaps: [], // last silences { start, end } between two bursts of media bytes
         buckets: new Map(), // epoch second -> bytes
       };
       sessions.set(hash, session);
     }
     return session;
   };
+  // A silence of 5 s+ between two bursts: while playing it's the player draining
+  // its buffer; after a pause, its end means playback resumed (a paused player
+  // never reloads once its buffer is full).
+  const GAP_MS = 5000;
   const countSessionBytes = (session, bytes) => {
     const now = Date.now();
+    if (session.lastByteAt && now - session.lastByteAt >= GAP_MS) {
+      session.gaps.push({ start: session.lastByteAt, end: now });
+      if (session.gaps.length > 30) session.gaps.shift();
+    }
     session.bytes += bytes;
     session.lastByteAt = now;
     const second = Math.floor(now / 1000);
@@ -582,6 +591,14 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
           upstreamFailed = true;
           if (session) session.lastUpstreamFailAt = Date.now();
           throw error;
+        }
+        // Once the media flows, an idle source is normal: the player's buffer is
+        // full and backpressure holds the transfer (pause, or between bursts).
+        // Dropping it after 30 s idle only forced needless reconnections; the
+        // player hanging up still tears it down (req "close" below).
+        if (req.method === "GET") {
+          media.req?.setTimeout?.(0);
+          media.socket?.setTimeout?.(0);
         }
         res.statusCode = media.statusCode || 502;
         for (const name of passthroughHeaders)
