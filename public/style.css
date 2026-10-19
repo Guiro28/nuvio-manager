@@ -2397,6 +2397,8 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .np-completed {background:rgba(56,189,248,.16);color:#7dd3fc;border:1px solid rgba(125,211,252,.3);}
 .stats-now-playing-info h3 {margin:0;overflow:hidden;font-size:1.05rem;text-overflow:ellipsis;white-space:nowrap;}
 .np-sub {margin:4px 0 8px;color:#c4cbd5;font-size:.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.np-addon {display:inline-flex;align-items:center;gap:5px;vertical-align:bottom;}
+.np-addon img {width:15px;height:15px;flex:none;object-fit:contain;border-radius:3px;}
 .np-release {margin-bottom:7px;overflow:hidden;color:#9fb0c6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.66rem;text-overflow:ellipsis;white-space:nowrap;}
 .np-badges {display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;}
 .np-badges span {padding:1px 6px;border:1px solid rgba(255,255,255,.15);border-radius:4px;background:rgba(255,255,255,.09);color:#dbe4f0;font-size:.62rem;font-weight:650;}

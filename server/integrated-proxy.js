@@ -237,8 +237,8 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         id: hash.slice(0, 16),
         accountId: grant?.accountId ?? null,
         profileId: grant?.profileId ?? null,
+        grantId: grant?.id || null,
         addonName: grant?.name || "",
-        addonLogo: grant?.logo || "",
         mode,
         type: meta.type || "",
         contentId: meta.id || "",
@@ -285,7 +285,12 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     return [...sessions.values()]
       .filter((s) => s.bytes >= SESSION_MIN_BYTES && s.accountId != null && s.profileId != null)
       .map((s) => {
-        const { buckets, ...rest } = s;
+        const { buckets, grantId, ...rest } = s;
+        // Addon logo read live from the grant; a grant without one gets it
+        // looked up once in the background (shown on the next refresh).
+        const grant = grantId ? getGrant(grantId) : null;
+        if (grant && !grant.logo && !grant.logoChecked) grantLogo(grant, s.mode);
+        rest.addonLogo = grant?.logo || "";
         // Exclude the current (partial) second so the rate does not flicker.
         const rate = Math.round((bucket(s, second - 5, second - 1) * 8) / 5);
         const series = Array.from({ length: 30 }, (_, i) => {
@@ -325,23 +330,33 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
   // manifest only exposes `icon`), fetches the upstream manifest THROUGH the proxy
   // — so geo-blocked addons resolve where a plain direct fetch would fail — and
   // backfills the grant. `logoChecked` stops us re-fetching when there is no logo.
+  const logoLookups = new Map(); // grant id -> pending lookup (one at a time)
+  const grantLogo = (grant, mode) => {
+    if (grant.logo) return Promise.resolve(grant.logo);
+    if (grant.logoChecked) return Promise.resolve(null);
+    if (logoLookups.has(grant.id)) return logoLookups.get(grant.id);
+    const lookup = (async () => {
+      try {
+        const meta = await fetchMeta(grant.manifestUrl, grant.mode || mode, grant);
+        grant.logo = meta.logo || "";
+        grant.logoChecked = true;
+        save();
+        return grant.logo || null;
+      } catch (error) {
+        log.debug("proxy", "logo d’addon introuvable", { addon: grant.name || "", error: error.message });
+        return null;
+      } finally {
+        logoLookups.delete(grant.id);
+      }
+    })();
+    logoLookups.set(grant.id, lookup);
+    return lookup;
+  };
   const resolveLogo = async (url) => {
     const ref = relayRef(url);
     if (!ref) return null;
     const grant = getGrant(ref.token);
-    if (!grant) return null;
-    if (grant.logo) return grant.logo;
-    if (grant.logoChecked) return null;
-    try {
-      const meta = await fetchMeta(grant.manifestUrl, grant.mode || ref.mode, grant);
-      grant.logo = meta.logo || "";
-      grant.logoChecked = true;
-      save();
-      return grant.logo || null;
-    } catch (error) {
-      log.debug("proxy", "logo d’addon introuvable", { addon: grant.name || "", error: error.message });
-      return null;
-    }
+    return grant ? grantLogo(grant, ref.mode) : null;
   };
 
   async function fetchMeta(manifestUrl, mode, item) {

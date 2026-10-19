@@ -863,24 +863,26 @@ export async function renderStatistics(container, { api, run, openDialog }) {
   // patched in place every refresh so nothing flickers.
   const nowPlayingItems = new Map();
   const nowPlayingSignature = (item) =>
-    [item.state, item.metadata?.title, item.metadata?.poster, item.release, item.profileName, item.avatarUrl].join("|");
+    [item.state, item.metadata?.title, item.metadata?.poster, item.release, item.profileName, item.avatarUrl, item.addonLogo].join("|");
   const nowPlayingCard = (item) => {
     const title = mediaTitle(item);
     const poster = safeImageUrl(item.metadata?.poster);
     const background = safeImageUrl(backdrop(item));
     const avatar = safeImageUrl(item.avatarUrl);
     const state = NOW_PLAYING_STATES[item.state] || NOW_PLAYING_STATES.playing;
-    const subtitle = [
-      item.kind === "episode" && item.episode != null
-        ? item.season != null
-          ? t("Saison {s} · Épisode {e}", { s: item.season, e: item.episode })
-          : t("Épisode {e}", { e: item.episode })
-        : item.metadata?.year || t("Film"),
-      item.addonName,
-    ].filter(Boolean).join(" · ");
+    const when = item.kind === "episode" && item.episode != null
+      ? item.season != null
+        ? t("Saison {s} · Épisode {e}", { s: item.season, e: item.episode })
+        : t("Épisode {e}", { e: item.episode })
+      : item.metadata?.year || t("Film");
+    const addonLogo = safeImageUrl(item.addonLogo);
+    const addon = item.addonName
+      ? `<span class="np-addon">${addonLogo ? `<img src="${esc(addonLogo)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<span>${esc(item.addonName)}</span></span>`
+      : "";
+    const subtitle = `${esc(when)}${addon ? ` · ${addon}` : ""}`;
     const badges = releaseBadges(item.release);
     if (item.size > 0) badges.push(fileSize(item.size));
-    return `${background ? `<img class="stats-card-bg" src="${esc(background)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<div class="stats-now-playing-overlay"></div><div class="stats-now-playing-content">${poster ? `<img class="stats-now-playing-poster" src="${esc(poster)}" alt="${esc(t("Jaquette de {title}", { title }))}" loading="lazy" referrerpolicy="no-referrer">` : '<span class="stats-now-playing-poster" aria-hidden="true">▶</span>'}<div class="stats-now-playing-info"><div class="stats-now-playing-top"><div class="stats-now-playing-profile">${avatar ? `<img src="${esc(avatar)}" alt="" referrerpolicy="no-referrer">` : `<span>${esc(item.profileName?.trim()?.slice(0, 1)?.toUpperCase() || "●")}</span>`}<span>${esc(item.profileName)}</span></div><span class="np-state np-${esc(item.state)}" data-np-state><span aria-hidden="true">${state.icon}</span> ${esc(t(state.label))}</span></div><h3 title="${esc(title)}">${esc(title)}</h3><p class="np-sub">${esc(subtitle)}</p>${item.release ? `<div class="np-release" title="${esc(item.release)}">${esc(item.release)}</div>` : ""}${badges.length ? `<div class="np-badges">${badges.map((badge) => `<span>${esc(badge)}</span>`).join("")}</div>` : ""}<div class="np-bar" role="progressbar" aria-label="${esc(t("Progression de {title}", { title }))}" aria-valuemin="0" aria-valuemax="100" data-np-progress><i data-np-bar></i></div><div class="stats-now-playing-times"><span data-np-pos></span><span data-np-dur></span></div><div class="np-bw"><span><span aria-hidden="true">↓</span> <b data-np-rate></b> · <span data-np-total></span></span><svg viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true"><polyline data-np-spark points=""/></svg></div></div></div>`;
+    return `${background ? `<img class="stats-card-bg" src="${esc(background)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<div class="stats-now-playing-overlay"></div><div class="stats-now-playing-content">${poster ? `<img class="stats-now-playing-poster" src="${esc(poster)}" alt="${esc(t("Jaquette de {title}", { title }))}" loading="lazy" referrerpolicy="no-referrer">` : '<span class="stats-now-playing-poster" aria-hidden="true">▶</span>'}<div class="stats-now-playing-info"><div class="stats-now-playing-top"><div class="stats-now-playing-profile">${avatar ? `<img src="${esc(avatar)}" alt="" referrerpolicy="no-referrer">` : `<span>${esc(item.profileName?.trim()?.slice(0, 1)?.toUpperCase() || "●")}</span>`}<span>${esc(item.profileName)}</span></div><span class="np-state np-${esc(item.state)}" data-np-state><span aria-hidden="true">${state.icon}</span> ${esc(t(state.label))}</span></div><h3 title="${esc(title)}">${esc(title)}</h3><p class="np-sub">${subtitle}</p>${item.release ? `<div class="np-release" title="${esc(item.release)}">${esc(item.release)}</div>` : ""}${badges.length ? `<div class="np-badges">${badges.map((badge) => `<span>${esc(badge)}</span>`).join("")}</div>` : ""}<div class="np-bar" role="progressbar" aria-label="${esc(t("Progression de {title}", { title }))}" aria-valuemin="0" aria-valuemax="100" data-np-progress><i data-np-bar></i></div><div class="stats-now-playing-times"><span data-np-pos></span><span data-np-dur></span></div><div class="np-bw"><span><span aria-hidden="true">↓</span> <b data-np-rate></b> · <span data-np-total></span></span><svg viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true"><polyline data-np-spark points=""/></svg></div></div></div>`;
   };
   const patchNowPlayingCard = (element, item) => {
     const percent = item.duration > 0 && item.position != null ? Math.max(0, Math.min(100, (item.position / item.duration) * 100)) : 0;
@@ -930,6 +932,8 @@ export async function renderStatistics(container, { api, run, openDialog }) {
       if (element.dataset.signature !== signature) {
         element.dataset.signature = signature;
         element.innerHTML = nowPlayingCard(item);
+        // Broken addon logo → keep just the name (inline onerror is blocked by the CSP).
+        element.querySelectorAll(".np-addon img").forEach((img) => img.addEventListener("error", () => img.remove(), { once: true }));
         element.setAttribute("aria-label", t("Afficher les détails de {title}", { title: mediaTitle(item) }));
       }
       element.classList.toggle("is-ended", item.state === "stopped" || item.state === "completed");
