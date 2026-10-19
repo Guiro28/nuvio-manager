@@ -9,10 +9,13 @@ const TTL_MS = TTL_HOURS > 0 ? TTL_HOURS * 3600 * 1000 : 0;
 // Le token /play est CHIFFRE (AES-256-GCM) : l'URL réelle et les headers restent
 // confidentiels, et le token ne peut être ni modifié ni forgé sans la clé serveur
 // (protège contre l'usage du relais en open proxy / SSRF). Il expire après TTL_MS.
-function encodeToken(url, headers, addonId) {
+function encodeToken(url, headers, addonId, content) {
   const payload = { u: url };
   if (headers && typeof headers === 'object' && Object.keys(headers).length > 0) payload.h = headers;
   if (addonId) payload.d = addonId;
+  // Contenu lu ("type/id" Stremio) : survit aux redemarrages et a la reutilisation
+  // du lien par le lecteur (reprise), contrairement a une table en memoire.
+  if (content) payload.c = String(content);
   if (TTL_MS > 0) payload.x = Date.now() + TTL_MS;
   return encrypt(JSON.stringify(payload));
 }
@@ -25,7 +28,7 @@ function decodeToken(token) {
     e.expired = true;
     throw e;
   }
-  return { url: obj.u, headers: obj.h || {}, addonId: obj.d || null };
+  return { url: obj.u, headers: obj.h || {}, addonId: obj.d || null, content: obj.c || null };
 }
 
 /** Base d'un addon = son manifestUrl sans le suffixe /manifest.json. */
@@ -75,7 +78,7 @@ async function fetchResource(addon, restPath, query, baseUrl, upstream, options 
   if (data && Array.isArray(data.streams)) {
     total = data.streams.length;
     data.streams = data.streams.map((s) => {
-      const out = rewriteStream(s, baseUrl, addon.id, options.onToken);
+      const out = rewriteStream(s, baseUrl, addon.id, options.onToken, options.content);
       if (out !== s && out.url && out.url.startsWith(baseUrl + '/play')) proxied++;
       return out;
     });
@@ -95,7 +98,7 @@ async function fetchResource(addon, restPath, query, baseUrl, upstream, options 
  * onToken(token, stream) : optionnel, permet a l'appelant d'associer le token au stream
  * d'origine (nom de release, taille...) sans l'inclure dans le token.
  */
-function rewriteStream(stream, baseUrl, addonId, onToken) {
+function rewriteStream(stream, baseUrl, addonId, onToken, content) {
   if (!stream || typeof stream.url !== 'string' || !/^https?:\/\//i.test(stream.url)) {
     return stream; // torrent (infoHash), externalUrl, ytId... : non proxifiable ici
   }
@@ -104,7 +107,7 @@ function rewriteStream(stream, baseUrl, addonId, onToken) {
     ? stream.behaviorHints.proxyHeaders.request
     : null;
 
-  const token = encodeToken(stream.url, reqHeaders, addonId);
+  const token = encodeToken(stream.url, reqHeaders, addonId, content);
   if (onToken) {
     try { onToken(token, stream); } catch { /* best-effort, ne bloque jamais la reponse */ }
   }

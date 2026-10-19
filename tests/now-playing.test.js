@@ -223,6 +223,37 @@ test("a completed title reopened from the start plays from 0", async () => {
   assert.equal(h.item().position, 5000);
 });
 
+test("an old link without its title is identified from Nuvio's progress and resumes there", async () => {
+  // Link reused after a restart: the relay doesn't know the title.
+  const h = harness({
+    type: "",
+    contentId: "",
+    progress: [
+      { content_id: "tt0111161", video_id: "tt0111161", position: 1_000_000, duration: 8_520_000, last_watched: 400_000 },
+      { content_id: "tt1160419", video_id: "tt1160419", position: 3_600_000, duration: 9_960_000, last_watched: 500_000 },
+      { content_id: "tt0903747", video_id: "tt0903747:5:14", season: 5, episode: 14, position: 2_000_000, duration: 2_820_000, last_watched: 600_000 },
+    ],
+  });
+  h.session.rangeLog.push({ at: h.now() + 1200, start: Math.round(h.session.total * 0.362) });
+  await h.advance(5000);
+  const item = h.item();
+  assert.equal(item.contentId, "tt1160419");
+  assert.equal(item.kind, "movie");
+  assert.equal(item.position, 3_600_000 + 5000 - 1200);
+  assert.equal(item.duration, 9_960_000);
+});
+
+test("no guessed 0 before Nuvio answers; a start over is 0", async () => {
+  const h = harness({
+    progress: [{ content_id: "tt1160419", position: 3_600_000, duration: 9_960_000, last_watched: 500_000 }],
+  });
+  assert.equal(h.item().position, null); // nothing known yet
+  await h.advance(5000);
+  assert.equal(h.item().position, 3_600_000 + 5000); // provisional: Nuvio resumes here
+  await h.advance(20000); // no jump into the file after 20 s → started over from 0
+  assert.equal(h.item().position, 25000);
+});
+
 test("a reconnect inside the grace window is not a stop", async () => {
   const h = harness();
   await h.advance(15000);

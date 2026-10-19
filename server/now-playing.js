@@ -35,7 +35,11 @@ const RESUME_BYTES = 1024 * 1024;
 const RESUME_FLOW_MS = 90000;
 const RESUME_FLOW_BYTES = 8 * 1024 * 1024;
 const COMPLETE_RATIO = 0.9;
-const FRESH_START_BYTES = 5 * 1024 * 1024;
+// No Nuvio answer this long after the start (network, unknown title): assume 0.
+const START_GUESS_MS = 20000;
+// Inferring the title of a link that doesn't carry it: the saved progress
+// position must match the jump offset within 3 % of the duration.
+const INFER_MATCH_RATIO = 0.03;
 // Start of a playback: players first read the file header (offset 0) and the
 // index at the very end (MKV cues / MP4 moov), then jump to the resume point.
 // A request inside the file during the first 90 s is that jump.
@@ -91,14 +95,14 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
   const ensureTrack = (s) => {
     let track = tracks.get(s.id);
     if (!track) {
-      // Assume a start at 0 until a jump into the file shows a resume (see
-      // placeStart); a first request already deep in the file is a resume too.
-      const fresh = (s.firstRangeStart || 0) <= FRESH_START_BYTES ||
-        (s.total > 0 && s.firstRangeStart / s.total < JUMP_MIN_RATIO);
+      // The start position stays unknown until placeStart settles it (Nuvio's
+      // saved progress and/or the jump into the file) — never a guessed 0.
       track = {
         state: "playing",
-        anchorPos: fresh ? 0 : null,
+        anchorPos: null,
         anchorAt: s.startedAt,
+        content: null, // { type, id } inferred from Nuvio for links without one
+        nuvioChecked: false, // Nuvio progress read at least once for this playback
         offsetRatio: null, // byte offset of the resume jump / file size
         startFrom: s.startedAt, // start window: [startFrom, startUntil]
         startUntil: s.startedAt + START_WINDOW_MS,
@@ -158,13 +162,28 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
   // position comes from the progress Nuvio saved before (when the byte offset
   // agrees), else from the offset itself.
   const placeStart = (s, track, t) => {
-    if (track.eventSeen || t > track.startUntil || !(s.total > 0)) return;
-    const jump = [...(s.rangeLog || [])]
-      .reverse()
-      .find((r) => r.at >= track.startFrom && r.start / s.total > JUMP_MIN_RATIO && r.start / s.total < JUMP_MAX_RATIO);
+    if (track.eventSeen || t > track.startUntil) return;
+    const jump = s.total > 0
+      ? [...(s.rangeLog || [])]
+        .reverse()
+        .find((r) => r.at >= track.startFrom && r.start / s.total > JUMP_MIN_RATIO && r.start / s.total < JUMP_MAX_RATIO)
+      : null;
     // Re-evaluated every tick of the window (idempotent): the saved progress may
     // only arrive with the first Nuvio read, after the jump was seen.
-    if (!jump) return;
+    if (!jump) {
+      // No jump (yet): once Nuvio has answered, an unfinished saved progress is
+      // where Nuvio resumes (a later jump confirms it); none means a start at 0.
+      // Without any Nuvio answer after a while, fall back to 0 as well.
+      // A resume jumps within seconds, so no jump after a while means the
+      // playback really started from 0 ("start over").
+      if (track.nuvioChecked || t - track.startFrom >= START_GUESS_MS) {
+        const resumed = Boolean(track.saved) && t - track.startFrom < START_GUESS_MS;
+        track.anchorPos = resumed ? track.saved.position : 0;
+        track.anchorAt = track.startFrom;
+        track.fromNuvio = resumed;
+      }
+      return;
+    }
     const ratio = jump.start / s.total;
     const duration = track.duration || track.saved?.duration || 0;
     const byOffset = duration > 0 ? ratio * duration : null;
@@ -240,6 +259,36 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
     }
   };
 
+  // What is being played: from the relay (stream list or the /play link itself),
+  // else inferred from Nuvio for an old link that carries no title.
+  const contentOf = (s, track) =>
+    s.contentId ? { type: s.type, id: s.contentId } : track.content;
+
+  // Old /play links (minted before they carried the title, e.g. reused by Nuvio
+  // after a restart): the title is the profile's unfinished progress whose saved
+  // position matches the resume jump into the file.
+  const inferContent = (s, track, rows) => {
+    if (track.offsetRatio == null) placeStart(s, track, now());
+    const ratio = track.offsetRatio;
+    if (ratio == null) return;
+    const pick = (rows || [])
+      .filter((row) => {
+        const duration = Number(row.duration) || 0;
+        const position = Number(row.position) || 0;
+        return duration > 0 &&
+          position / duration < COMPLETE_RATIO &&
+          time(row.last_watched) < s.startedAt - 5000 &&
+          Math.abs(position / duration - ratio) <= INFER_MATCH_RATIO;
+      })
+      .sort((a, b) => time(b.last_watched) - time(a.last_watched))[0];
+    if (!pick) return;
+    track.content = {
+      type: pick.content_type === "movie" ? "movie" : "series",
+      id: String(pick.video_id || pick.content_id),
+    };
+    log?.debug?.("lecture", "titre déduit de la progression Nuvio", { session: s.id, content: track.content.id });
+  };
+
   // Apply one Nuvio progress read to a session.
   const applyProgress = (s, track, rows) => {
     const t = now();
@@ -247,10 +296,13 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
     track.polledAt = t;
     const newRequests = s.requests - track.pollRequests;
     track.pollRequests = s.requests;
-    if (!s.contentId) return;
-    const content = parseContent(s.type, s.contentId);
-    const row = latestMatch(rows, s, content, "last_watched");
-    if (!row) return;
+    track.nuvioChecked = true;
+    if (!contentOf(s, track)) inferContent(s, track, rows);
+    const current = contentOf(s, track);
+    const row = current
+      ? latestMatch(rows, { contentId: current.id }, parseContent(current.type, current.id), "last_watched")
+      : null;
+    if (!row) return placeStart(s, track, t);
     const lastWatched = time(row.last_watched);
     const position = Number(row.position) || 0;
     const duration = Number(row.duration) || 0;
@@ -262,13 +314,7 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
       if (lastWatched < s.startedAt - 5000) {
         track.nuvioLastWatched = lastWatched;
         if (!(duration > 0 && position / duration >= COMPLETE_RATIO)) track.saved = { position, duration };
-        placeStart(s, track, t);
-        if (track.anchorPos == null && track.offsetRatio == null && track.saved) {
-          track.anchorPos = position;
-          track.anchorAt = s.startedAt;
-          track.fromNuvio = true;
-        }
-        return;
+        return placeStart(s, track, t);
       }
     }
     if (lastWatched <= track.nuvioLastWatched) return;
@@ -300,9 +346,9 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
       track.state = "completed";
       return;
     }
-    if (!s.contentId || !watchedRows) return;
-    const content = parseContent(s.type, s.contentId);
-    const row = latestMatch(watchedRows, s, content, "watched_at");
+    const current = contentOf(s, track);
+    if (!current || !watchedRows) return;
+    const row = latestMatch(watchedRows, { contentId: current.id }, parseContent(current.type, current.id), "watched_at");
     if (row && time(row.watched_at) >= s.startedAt - 60000) track.state = "completed";
   };
 
@@ -366,7 +412,8 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
         )
       )
         continue;
-      const content = parseContent(s.type, s.contentId);
+      const current = contentOf(s, track);
+      const content = current ? parseContent(current.type, current.id) : parseContent("", "");
       items.push({
         id: s.id,
         ref: `${s.accountId}:${s.profileId}`,

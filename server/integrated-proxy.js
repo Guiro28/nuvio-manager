@@ -227,11 +227,20 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     for (const [key, s] of sessions)
       if (Math.max(s.lastRequestAt, s.lastByteAt, s.lastCloseAt) < cutoff) sessions.delete(key);
   };
-  const trackSession = (hash, grant, mode) => {
+  const trackSession = (hash, grant, mode, tokenContent) => {
     let session = sessions.get(hash);
     if (!session) {
       pruneSessions();
       const meta = streamMeta.get(hash) || {};
+      // The token itself carries "type/id" (links minted since 0.3.7), so a link
+      // reused after a restart is still identified when its stream list is gone.
+      if (!meta.id && tokenContent) {
+        const slash = String(tokenContent).indexOf("/");
+        if (slash > 0) {
+          meta.type = tokenContent.slice(0, slash);
+          meta.id = tokenContent.slice(slash + 1);
+        }
+      }
       const now = Date.now();
       session = {
         id: hash.slice(0, 16),
@@ -542,7 +551,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         let session = null;
         let upstreamFailed = false;
         if (req.method === "GET") {
-          session = trackSession(hashToken(rawToken), grant, mode);
+          session = trackSession(hashToken(rawToken), grant, mode, decoded.content);
           session.requests++;
           session.lastRequestAt = Date.now();
           session.openConns++;
@@ -649,7 +658,9 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         url.search,
         `${configuredOrigin()}/relay/${mode}`,
         upstream,
-        streamId ? { onToken: (token, stream) => rememberStream(token, stream, streamType, streamId) } : {},
+        streamId
+          ? { content: `${streamType}/${streamId}`, onToken: (token, stream) => rememberStream(token, stream, streamType, streamId) }
+          : {},
       );
       res.writeHead(output.status, { "Content-Type": output.contentType });
       if (req.method === "HEAD") res.end();
