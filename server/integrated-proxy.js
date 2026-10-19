@@ -132,11 +132,12 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     return (Number.isFinite(h) && h > 0 ? h : 12) * 3600 * 1000;
   })();
   const seenPlayTokens = new Map(); // tokenHash -> expiresAt
+  const hashToken = (token) => crypto.createHash("sha256").update(String(token)).digest("hex").slice(0, 32);
   const isNewOpen = (token) => {
     const now = Date.now();
     if (seenPlayTokens.size > 10000)
       for (const [k, exp] of seenPlayTokens) if (exp <= now) seenPlayTokens.delete(k);
-    const hash = crypto.createHash("sha256").update(String(token)).digest("hex").slice(0, 32);
+    const hash = hashToken(token);
     const exp = seenPlayTokens.get(hash);
     if (exp && exp > now) return false;
     seenPlayTokens.set(hash, now + DEDUP_MS);
@@ -165,6 +166,135 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     save();
   };
   const openEvents = () => state.addonOpens;
+
+  // ── Live playback sessions ("Lecture en cours") ──────────────────────────────
+  // When an addon's stream list goes through the relay, each rewritten /play token
+  // is remembered with what the addon said about that stream (release name, size,
+  // content id). When a token is then played, the relay tracks the session: bytes
+  // (per-second buckets for the live rate), requests, open connections and who
+  // closed them. In memory only — a restart simply forgets live sessions.
+  const STREAM_META_MAX = 20000;
+  const SESSION_MIN_BYTES = 2 * 1024 * 1024; // below this it's a probe, not a playback
+  const SESSION_RETENTION_MS = 4 * 3600 * 1000;
+  const streamMeta = new Map(); // tokenHash -> { type, id, release, source, size }
+  const sessions = new Map(); // tokenHash -> session
+  const SIZE_UNITS = { kb: 1e3, mb: 1e6, gb: 1e9, tb: 1e12, kib: 1024, mib: 1024 ** 2, gib: 1024 ** 3, tib: 1024 ** 4 };
+  const parseSize = (text) => {
+    const m = /(\d+(?:[.,]\d+)?)\s*(TB|GB|MB|KB|TiB|GiB|MiB|KiB)\b/i.exec(String(text || ""));
+    return m ? Math.round(Number(m[1].replace(",", ".")) * SIZE_UNITS[m[2].toLowerCase()]) : 0;
+  };
+  const VIDEO_FILE = /\.(mkv|mp4|m4v|avi|ts|m2ts|webm|mov|wmv)$/i;
+  const cleanLine = (line) => String(line || "").replace(/^[^\p{L}\p{N}[(]+/u, "").trim();
+  // Release name: behaviorHints.filename (Stremio standard), else the line of the
+  // title/description that looks like a release (filename or resolution tag).
+  const releaseOf = (stream) => {
+    const filename = typeof stream.behaviorHints?.filename === "string" ? stream.behaviorHints.filename.trim() : "";
+    if (filename) return filename.slice(0, 300);
+    const lines = String(stream.description || stream.title || "").split("\n").map(cleanLine).filter(Boolean);
+    const line = lines.find((l) => VIDEO_FILE.test(l)) ||
+      lines.find((l) => /\b(2160p|1080p|720p|480p|4k|uhd)\b/i.test(l) && /[._]/.test(l)) ||
+      "";
+    return line.slice(0, 300);
+  };
+  const rememberStream = (token, stream, type, id) => {
+    const hints = stream.behaviorHints || {};
+    streamMeta.set(hashToken(token), {
+      type,
+      id,
+      release: releaseOf(stream),
+      source: String(stream.name || "").split("\n").map((s) => s.trim()).filter(Boolean).join(" ").slice(0, 80),
+      size: Number(hints.videoSize) > 0 ? Number(hints.videoSize) : parseSize(`${stream.description || ""}\n${stream.title || ""}`),
+    });
+    if (streamMeta.size > STREAM_META_MAX) streamMeta.delete(streamMeta.keys().next().value);
+  };
+  // Fallback release name from the media itself (debrid links usually end with
+  // the file name; some sources send Content-Disposition). Never the URL itself.
+  const fileNameFrom = (mediaUrl, disposition) => {
+    const fromHeader = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String(disposition || ""))?.[1];
+    if (fromHeader) {
+      try { return decodeURIComponent(fromHeader).slice(0, 300); } catch { return fromHeader.slice(0, 300); }
+    }
+    try {
+      const last = new URL(mediaUrl).pathname.split("/").filter(Boolean).pop() || "";
+      const name = decodeURIComponent(last);
+      return VIDEO_FILE.test(name) ? name.slice(0, 300) : "";
+    } catch {
+      return "";
+    }
+  };
+  const pruneSessions = () => {
+    const cutoff = Date.now() - SESSION_RETENTION_MS;
+    for (const [key, s] of sessions)
+      if (Math.max(s.lastRequestAt, s.lastByteAt, s.lastCloseAt) < cutoff) sessions.delete(key);
+  };
+  const trackSession = (hash, grant, mode) => {
+    let session = sessions.get(hash);
+    if (!session) {
+      pruneSessions();
+      const meta = streamMeta.get(hash) || {};
+      const now = Date.now();
+      session = {
+        id: hash.slice(0, 16),
+        accountId: grant?.accountId ?? null,
+        profileId: grant?.profileId ?? null,
+        addonName: grant?.name || "",
+        addonLogo: grant?.logo || "",
+        mode,
+        type: meta.type || "",
+        contentId: meta.id || "",
+        release: meta.release || "",
+        source: meta.source || "",
+        size: meta.size || 0,
+        total: 0,
+        startedAt: now,
+        lastRequestAt: now,
+        lastByteAt: 0,
+        lastCloseAt: 0,
+        lastClientCloseAt: 0,
+        lastUpstreamFailAt: 0,
+        requests: 0,
+        openConns: 0,
+        bytes: 0,
+        firstRangeStart: null,
+        buckets: new Map(), // epoch second -> bytes
+      };
+      sessions.set(hash, session);
+    }
+    return session;
+  };
+  const countSessionBytes = (session, bytes) => {
+    const now = Date.now();
+    session.bytes += bytes;
+    session.lastByteAt = now;
+    const second = Math.floor(now / 1000);
+    session.buckets.set(second, (session.buckets.get(second) || 0) + bytes);
+    if (session.buckets.size > 90)
+      for (const key of session.buckets.keys()) if (key < second - 70) session.buckets.delete(key);
+  };
+  // Snapshot for the now-playing engine: only real playbacks (past the probe
+  // threshold) of tracked profiles, with the live rate (bits/s over the last 5 s)
+  // and a 60 s history in 2 s steps for the sparkline.
+  const liveSessions = () => {
+    pruneSessions();
+    const second = Math.floor(Date.now() / 1000);
+    const bucket = (s, from, to) => {
+      let sum = 0;
+      for (let k = from; k <= to; k++) sum += s.buckets.get(k) || 0;
+      return sum;
+    };
+    return [...sessions.values()]
+      .filter((s) => s.bytes >= SESSION_MIN_BYTES && s.accountId != null && s.profileId != null)
+      .map((s) => {
+        const { buckets, ...rest } = s;
+        // Exclude the current (partial) second so the rate does not flicker.
+        const rate = Math.round((bucket(s, second - 5, second - 1) * 8) / 5);
+        const series = Array.from({ length: 30 }, (_, i) => {
+          const end = second - 1 - (29 - i) * 2;
+          return Math.round((bucket(s, end - 1, end) * 8) / 2);
+        });
+        return { ...rest, rate, series };
+      });
+  };
 
   // Resolve a relay token to its grant (new) or legacy addon. Revoked grants are
   // returned too (callers decide): the relay refuses them, but clone/describe
@@ -389,32 +519,76 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
       if (match[2] === "play") {
         const rawToken = url.searchParams.get("t");
         const decoded = decodeToken(rawToken);
+        const grant = decoded.addonId ? getGrant(decoded.addonId) : null;
         // Count a stream open once per fresh token (ignores range/buffer/seek).
-        if (req.method === "GET" && decoded.addonId && isNewOpen(rawToken)) {
-          const grant = getGrant(decoded.addonId);
-          if (grant) recordOpen(grant, mode);
+        if (req.method === "GET" && grant && isNewOpen(rawToken)) recordOpen(grant, mode);
+        // Live session tracking (GET only: HEAD probes carry no media).
+        let session = null;
+        let upstreamFailed = false;
+        if (req.method === "GET") {
+          session = trackSession(hashToken(rawToken), grant, mode);
+          session.requests++;
+          session.lastRequestAt = Date.now();
+          session.openConns++;
+          const rangeStart = Number(/bytes=(\d+)-/i.exec(req.headers.range || "")?.[1] || 0);
+          if (session.firstRangeStart == null) session.firstRangeStart = rangeStart;
+          res.on("close", () => {
+            session.openConns = Math.max(0, session.openConns - 1);
+            session.lastCloseAt = Date.now();
+            // Not finished and not an upstream failure → the player hung up.
+            if (!res.writableFinished && !upstreamFailed) session.lastClientCloseAt = session.lastCloseAt;
+          });
         }
         const headers = { ...decoded.headers };
         if (req.headers.range) headers.range = req.headers.range;
         headers["user-agent"] ||= req.headers["user-agent"] || "Mozilla/5.0";
         headers.accept ||= "*/*";
-        const { res: media } = await request(decoded.url, {
-          upstream,
-          headers,
-          method: req.method === "HEAD" ? "HEAD" : "GET",
-          timeout: 30000,
-        });
+        let media;
+        try {
+          ({ res: media } = await request(decoded.url, {
+            upstream,
+            headers,
+            method: req.method === "HEAD" ? "HEAD" : "GET",
+            timeout: 30000,
+          }));
+        } catch (error) {
+          upstreamFailed = true;
+          if (session) session.lastUpstreamFailAt = Date.now();
+          throw error;
+        }
         res.statusCode = media.statusCode || 502;
         for (const name of passthroughHeaders)
           if (media.headers[name]) res.setHeader(name, media.headers[name]);
         res.setHeader("Accept-Ranges", media.headers["accept-ranges"] || "bytes");
+        if (session) {
+          const total = Number(/\/(\d+)\s*$/.exec(media.headers["content-range"] || "")?.[1] ||
+            (media.statusCode === 200 ? media.headers["content-length"] : 0) || 0);
+          if (total > session.total) session.total = total;
+          if (!session.release) session.release = fileNameFrom(decoded.url, media.headers["content-disposition"]);
+        }
         if (req.method === "HEAD") {
           media.resume();
           res.end();
         } else {
-          media.on("error", () => res.destroy());
+          media.on("error", () => {
+            upstreamFailed = true;
+            session.lastUpstreamFailAt = Date.now();
+            res.destroy();
+          });
+          // A source connection cut mid-transfer (without an "error") is also an
+          // upstream failure — unless the player already hung up (we destroy
+          // the source ourselves then).
+          media.on("close", () => {
+            if (!media.complete && !res.destroyed && !upstreamFailed) {
+              upstreamFailed = true;
+              session.lastUpstreamFailAt = Date.now();
+            }
+          });
           req.on("close", () => media.destroy());
-          media.on("data", (chunk) => countBytes(mode, chunk.length));
+          media.on("data", (chunk) => {
+            countBytes(mode, chunk.length);
+            countSessionBytes(session, chunk.length);
+          });
           media.pipe(res);
         }
         return true;
@@ -441,12 +615,23 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         return true;
       }
 
+      // Stream lists: remember each rewritten token's release info and content id
+      // (stream/{type}/{id}.json) for the live "Lecture en cours" view.
+      const streamPath = /^stream\/([^/]+)\/([^/]+)\.json$/.exec(restPath);
+      let streamType = "", streamId = "";
+      if (streamPath) {
+        try {
+          streamType = decodeURIComponent(streamPath[1]);
+          streamId = decodeURIComponent(streamPath[2]);
+        } catch {}
+      }
       const output = await fetchResource(
         addon,
         restPath,
         url.search,
         `${configuredOrigin()}/relay/${mode}`,
         upstream,
+        streamId ? { onToken: (token, stream) => rememberStream(token, stream, streamType, streamId) } : {},
       );
       res.writeHead(output.status, { "Content-Type": output.contentType });
       if (req.method === "HEAD") res.end();
@@ -468,5 +653,5 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     }
   }
 
-  return { handle, register, status, test, metrics, openEvents, describe, resolveLogo, revokeAccount, reconcile };
+  return { handle, register, status, test, metrics, openEvents, liveSessions, describe, resolveLogo, revokeAccount, reconcile };
 }

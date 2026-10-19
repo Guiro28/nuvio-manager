@@ -383,7 +383,7 @@ export function createHistoryStore({
   // its "accountId:profileId" ref, or null when it has not been mirrored yet.
   function profileLabel(ref) {
     const p = store.profiles[String(ref)];
-    return p ? { profileName: p.profileName || "", accountName: p.accountName || "" } : null;
+    return p ? { profileName: p.profileName || "", accountName: p.accountName || "", avatarUrl: p.avatarUrl || "" } : null;
   }
 
   function status() {

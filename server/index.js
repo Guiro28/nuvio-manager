@@ -4,6 +4,7 @@ import { activity } from "./activity.js";
 import { enrichActivity } from "./tmdb.js";
 import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
 import { createHistoryStore } from "./history-store.js";
+import { createNowPlaying } from "./now-playing.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestLogo } from "./manifest.js";
 import { createIntegratedProxy, normalizeProxyUrl, proxySummary, normalizeManifestUrl } from "./integrated-proxy.js";
@@ -477,6 +478,17 @@ const historyStore = createHistoryStore({
     error: (message, fields) => log.warn("sync", message, fields),
     debug: (message, fields) => log.debug("sync", message, fields),
   },
+});
+// Live "Lecture en cours": relay sessions + Nuvio progress pushes (pause/seek/
+// exit). Nuvio is only read for profiles that currently have a live session.
+const nowPlaying = createNowPlaying({
+  liveSessions: () => addonProxy.liveSessions(),
+  fetchRows: async (accountId, profileId, kind) => {
+    const a = state.accounts.find((x) => x.id === accountId);
+    if (!a) return [];
+    return (await activity(await token(a), profileId, kind, 1, a.provider)).items;
+  },
+  log,
 });
 // Background sampling of process CPU% and RSS, kept as a 1-week history in the
 // data volume for the home-page chart. A single sampler owns the cpuUsage delta
@@ -1537,6 +1549,43 @@ const server = http.createServer(async (req, res) => {
         const result = await pushHomeCatalogSettings(await token(a), profileId, settingsJson, a.provider, originId(a));
         return json(res, { ok: true, result });
       }
+      if (route === "/api/now-playing") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        // Admins see every account; a Nuvio viewer only its own profiles.
+        const items = nowPlaying
+          .list()
+          .filter((item) => isAdmin || item.accountId === viewer.account)
+          .map((item) => {
+            const label = historyStore.profileLabel(item.ref) || {};
+            return {
+              ...item,
+              profileName: label.profileName || `Profil ${item.profileId}`,
+              avatarUrl: label.avatarUrl || "",
+            };
+          });
+        // TMDB metadata (cached) — only IMDb ids are resolvable through /find.
+        const enriched = await enrichActivity(
+          {
+            items: items
+              .filter((item) => /^tt\d+$/.test(item.contentId))
+              .map((item) => ({ content_id: item.contentId, content_type: item.kind === "movie" ? "movie" : "series" })),
+          },
+          {
+            key: panel.tmdbKey,
+            cache: tmdbCache,
+            persist: (value) => db.write("tmdb-cache", value),
+            language: tmdbLanguage,
+          },
+        );
+        const metadata = new Map(enriched.items.map((row) => [`${row.content_type}:${row.content_id}`, row.metadata]));
+        return json(res, {
+          generatedAt: Date.now(),
+          items: items.map((item) => ({
+            ...item,
+            metadata: metadata.get(`${item.kind === "movie" ? "movie" : "series"}:${item.contentId}`) || null,
+          })),
+        });
+      }
       if (route === "/api/statistics") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
         const days = Number(url.searchParams.get("days") ?? 30);
@@ -2447,6 +2496,7 @@ server.listen(port, host, () => {
     log.info("system", "Authentification par proxy externe activée (AUTH_PROXY)");
   // Start the background history mirror (initial fill + periodic refresh).
   if (!setupRequired()) historyStore.start();
+  nowPlaying.start();
   if (setupRequired())
     log.warn("system", "Configuration initiale requise : créer l’administrateur (UI) ou définir ADMIN_USERNAME/ADMIN_PASSWORD/PUBLIC_URL");
   else if (!panel.publicUrl)

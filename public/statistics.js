@@ -27,11 +27,63 @@ const relativeDate = (value) => {
 };
 const sourceLabel = (source) =>
   ({ nuvio: "Nuvio", tuvora: "Tuvora", trakt: "Trakt", simkl: "Simkl" })[source] || source;
+const playbackTime = (milliseconds) => {
+  const totalSeconds = Math.max(0, Math.round(Number(milliseconds || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+};
+const fileSize = (bytes) => {
+  const value = Number(bytes) || 0;
+  const [unit, size] = value >= 1e9 ? ["gigabyte", 1e9] : ["megabyte", 1e6];
+  return new Intl.NumberFormat(getLang(), {
+    style: "unit",
+    unit,
+    unitDisplay: "short",
+    maximumFractionDigits: value >= 1e9 ? 1 : 0,
+  }).format(value / size);
+};
+const bitRate = (bitsPerSecond) =>
+  `${new Intl.NumberFormat(getLang(), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format((Number(bitsPerSecond) || 0) / 1e6)} Mb/s`;
+// Quality tags read from a release name (scene naming conventions).
+const releaseBadges = (release) => {
+  const r = String(release || "");
+  const tags = [];
+  const resolution = /\b(2160p|4k|uhd)\b/i.test(r) ? "4K"
+    : /\b1080p\b/i.test(r) ? "1080p"
+    : /\b720p\b/i.test(r) ? "720p"
+    : /\b480p\b/i.test(r) ? "480p" : "";
+  if (resolution) tags.push(resolution);
+  if (/\bremux\b/i.test(r)) tags.push("REMUX");
+  else if (/\b(blu-?ray|bdrip|brrip)\b/i.test(r)) tags.push("BluRay");
+  else if (/\bweb-?dl\b/i.test(r)) tags.push("WEB-DL");
+  else if (/\bweb-?rip\b/i.test(r)) tags.push("WEBRip");
+  if (/\b(dv|dovi|dolby[ ._-]?vision)\b/i.test(r)) tags.push("DV");
+  if (/\bhdr10(\+|plus)/i.test(r)) tags.push("HDR10+");
+  else if (/\bhdr(10)?\b/i.test(r)) tags.push("HDR");
+  if (/\b(x265|h\.?265|hevc)\b/i.test(r)) tags.push("HEVC");
+  else if (/\bav1\b/i.test(r)) tags.push("AV1");
+  if (/\batmos\b/i.test(r)) tags.push("Atmos");
+  else if (/\btrue-?hd\b/i.test(r)) tags.push("TrueHD");
+  else if (/\bdts/i.test(r)) tags.push("DTS");
+  const channels = /(?<![\d.])([257]\.[01])(?!\d)/.exec(r)?.[1];
+  if (channels) tags.push(channels);
+  return tags;
+};
+const NOW_PLAYING_STATES = {
+  playing: { icon: "▶", label: "En cours" },
+  paused: { icon: "❚❚", label: "En pause" },
+  stopped: { icon: "■", label: "Arrêté" },
+  completed: { icon: "✓", label: "Terminé" },
+};
 
 let statsResizeHandler = null;
 let statsOutsideHandler = null;
 export async function renderStatistics(container, { api, run, openDialog }) {
-  container.innerHTML = `<div class="title-row"><div><h1>${esc(t("Statistiques"))}</h1><p class="muted">${esc(t("Comparez l’activité et les habitudes de visionnage de tous les profils."))}</p></div><div class="stats-controls"><div class="stats-profile-filter"><span class="stats-control-label">${esc(t("Profils"))}</span><details id="stats-profile-menu" class="stats-profile-menu"><summary><span id="stats-profile-summary">${esc(t("Tous les profils"))}</span><span class="stats-profile-chevron" aria-hidden="true">⌄</span></summary><div class="stats-profile-popover"><div class="stats-profile-actions"><button type="button" id="stats-select-all">${esc(t("Tout sélectionner"))}</button><button type="button" id="stats-select-none" class="quiet">${esc(t("Tout désélectionner"))}</button></div><div id="stats-profile-list" class="stats-profile-list" role="group" aria-label="${esc(t("Profils à comparer"))}"></div></div></details></div><label>${esc(t("Période"))}<select id="stats-days"><option value="30">${esc(t("30 jours"))}</option><option value="90">${esc(t("90 jours"))}</option><option value="365">${esc(t("1 an"))}</option><option value="0">${esc(t("Tout l’historique"))}</option><option value="custom">${esc(t("Jours précis…"))}</option></select></label><input type="number" id="stats-days-input" class="stats-days-input" min="1" max="3650" step="1" value="7" hidden aria-label="${esc(t("Nombre de jours"))}"><button id="stats-refresh">${esc(t("Actualiser"))}</button></div></div><p id="stats-status" role="status">${esc(t("Chargement des historiques…"))}</p><div id="stats-view"></div>`;
+  container.innerHTML = `<section id="stats-now-playing" class="panel stats-now-playing"><div class="stats-now-playing-heading"><div><h2>${esc(t("Lecture en cours"))}</h2><p class="muted">${esc(t("Détection via le relais proxy et Nuvio."))}</p></div><small id="np-summary"></small></div><div id="np-grid" class="stats-now-playing-grid"></div><p id="np-empty" class="empty-inline">${esc(t("Aucune lecture en cours."))}</p></section><div class="title-row"><div><h1>${esc(t("Statistiques"))}</h1><p class="muted">${esc(t("Comparez l’activité et les habitudes de visionnage de tous les profils."))}</p></div><div class="stats-controls"><div class="stats-profile-filter"><span class="stats-control-label">${esc(t("Profils"))}</span><details id="stats-profile-menu" class="stats-profile-menu"><summary><span id="stats-profile-summary">${esc(t("Tous les profils"))}</span><span class="stats-profile-chevron" aria-hidden="true">⌄</span></summary><div class="stats-profile-popover"><div class="stats-profile-actions"><button type="button" id="stats-select-all">${esc(t("Tout sélectionner"))}</button><button type="button" id="stats-select-none" class="quiet">${esc(t("Tout désélectionner"))}</button></div><div id="stats-profile-list" class="stats-profile-list" role="group" aria-label="${esc(t("Profils à comparer"))}"></div></div></details></div><label>${esc(t("Période"))}<select id="stats-days"><option value="30">${esc(t("30 jours"))}</option><option value="90">${esc(t("90 jours"))}</option><option value="365">${esc(t("1 an"))}</option><option value="0">${esc(t("Tout l’historique"))}</option><option value="custom">${esc(t("Jours précis…"))}</option></select></label><input type="number" id="stats-days-input" class="stats-days-input" min="1" max="3650" step="1" value="7" hidden aria-label="${esc(t("Nombre de jours"))}"><button id="stats-refresh">${esc(t("Actualiser"))}</button></div></div><p id="stats-status" role="status">${esc(t("Chargement des historiques…"))}</p><div id="stats-view"></div>`;
   const $ = (selector) => container.querySelector(selector);
   const mediaDetails = new Map();
   const profileDetails = new Map();
@@ -805,6 +857,120 @@ export async function renderStatistics(container, { api, run, openDialog }) {
     updateProfileSummary();
     run(load);
   };
+  // ── Lecture en cours ─────────────────────────────────────────────────────────
+  // Cards are keyed by session id. The static part (images, titles, release) is
+  // only rebuilt when it changes; position, rate, volume and the sparkline are
+  // patched in place every refresh so nothing flickers.
+  const nowPlayingItems = new Map();
+  const nowPlayingSignature = (item) =>
+    [item.state, item.metadata?.title, item.metadata?.poster, item.release, item.profileName, item.avatarUrl].join("|");
+  const nowPlayingCard = (item) => {
+    const title = mediaTitle(item);
+    const poster = safeImageUrl(item.metadata?.poster);
+    const background = safeImageUrl(backdrop(item));
+    const avatar = safeImageUrl(item.avatarUrl);
+    const state = NOW_PLAYING_STATES[item.state] || NOW_PLAYING_STATES.playing;
+    const subtitle = [
+      item.kind === "episode" && item.episode != null
+        ? item.season != null
+          ? t("Saison {s} · Épisode {e}", { s: item.season, e: item.episode })
+          : t("Épisode {e}", { e: item.episode })
+        : item.metadata?.year || t("Film"),
+      item.addonName,
+    ].filter(Boolean).join(" · ");
+    const badges = releaseBadges(item.release);
+    if (item.size > 0) badges.push(fileSize(item.size));
+    return `${background ? `<img class="stats-card-bg" src="${esc(background)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}<div class="stats-now-playing-overlay"></div><div class="stats-now-playing-content">${poster ? `<img class="stats-now-playing-poster" src="${esc(poster)}" alt="${esc(t("Jaquette de {title}", { title }))}" loading="lazy" referrerpolicy="no-referrer">` : '<span class="stats-now-playing-poster" aria-hidden="true">▶</span>'}<div class="stats-now-playing-info"><div class="stats-now-playing-top"><div class="stats-now-playing-profile">${avatar ? `<img src="${esc(avatar)}" alt="" referrerpolicy="no-referrer">` : `<span>${esc(item.profileName?.trim()?.slice(0, 1)?.toUpperCase() || "●")}</span>`}<span>${esc(item.profileName)}</span></div><span class="np-state np-${esc(item.state)}" data-np-state><span aria-hidden="true">${state.icon}</span> ${esc(t(state.label))}</span></div><h3 title="${esc(title)}">${esc(title)}</h3><p class="np-sub">${esc(subtitle)}</p>${item.release ? `<div class="np-release" title="${esc(item.release)}">${esc(item.release)}</div>` : ""}${badges.length ? `<div class="np-badges">${badges.map((badge) => `<span>${esc(badge)}</span>`).join("")}</div>` : ""}<div class="np-bar" role="progressbar" aria-label="${esc(t("Progression de {title}", { title }))}" aria-valuemin="0" aria-valuemax="100" data-np-progress><i data-np-bar></i></div><div class="stats-now-playing-times"><span data-np-pos></span><span data-np-dur></span></div><div class="np-bw"><span><span aria-hidden="true">↓</span> <b data-np-rate></b> · <span data-np-total></span></span><svg viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true"><polyline data-np-spark points=""/></svg></div></div></div>`;
+  };
+  const patchNowPlayingCard = (element, item) => {
+    const percent = item.duration > 0 && item.position != null ? Math.max(0, Math.min(100, (item.position / item.duration) * 100)) : 0;
+    element.querySelector("[data-np-bar]").style.width = `${percent}%`;
+    element.querySelector("[data-np-progress]").setAttribute("aria-valuenow", String(Math.round(percent)));
+    const estimated = !item.exact && item.position != null;
+    const pos = element.querySelector("[data-np-pos]");
+    pos.textContent = item.position == null ? "—" : `${estimated ? "≈ " : ""}${playbackTime(item.position)}`;
+    pos.title = estimated ? t("Position estimée par le relais") : "";
+    element.querySelector("[data-np-dur]").textContent = item.duration > 0 ? playbackTime(item.duration) : "";
+    element.querySelector("[data-np-rate]").textContent = bitRate(item.rate);
+    element.querySelector("[data-np-total]").textContent = t("{size} transférés", { size: fileSize(item.transferred) });
+    const series = item.series || [];
+    const peak = Math.max(1, ...series);
+    element.querySelector("[data-np-spark]").setAttribute(
+      "points",
+      series.map((value, index) => `${((index / Math.max(1, series.length - 1)) * 60).toFixed(1)},${(15 - (value / peak) * 14).toFixed(1)}`).join(" "),
+    );
+    const badge = element.querySelector("[data-np-state]");
+    badge.title = item.stoppedAt ? relativeDate(item.stoppedAt) : t("Depuis {time}", { time: new Date(item.startedAt).toLocaleTimeString(getLang(), { hour: "2-digit", minute: "2-digit" }) });
+  };
+  const paintNowPlaying = (items) => {
+    const grid = $("#np-grid");
+    if (!grid) return;
+    const seen = new Set();
+    items.forEach((item, index) => {
+      seen.add(item.id);
+      let element = grid.querySelector(`[data-np-id="${CSS.escape(item.id)}"]`);
+      if (!element) {
+        element = document.createElement("article");
+        element.className = "stats-now-playing-item";
+        element.dataset.npId = item.id;
+        element.tabIndex = 0;
+        element.setAttribute("role", "button");
+        const open = () => {
+          const current = nowPlayingItems.get(element.dataset.npId);
+          if (current) showMediaDetail({ ...current, at: current.startedAt });
+        };
+        element.addEventListener("click", open);
+        element.addEventListener("keydown", (event) => {
+          if (!["Enter", " "].includes(event.key)) return;
+          event.preventDefault();
+          open();
+        });
+      }
+      const signature = nowPlayingSignature(item);
+      if (element.dataset.signature !== signature) {
+        element.dataset.signature = signature;
+        element.innerHTML = nowPlayingCard(item);
+        element.setAttribute("aria-label", t("Afficher les détails de {title}", { title: mediaTitle(item) }));
+      }
+      element.classList.toggle("is-ended", item.state === "stopped" || item.state === "completed");
+      patchNowPlayingCard(element, item);
+      if (grid.children[index] !== element) grid.insertBefore(element, grid.children[index] || null);
+      nowPlayingItems.set(item.id, item);
+    });
+    [...grid.children].forEach((child) => {
+      if (!seen.has(child.dataset.npId)) {
+        nowPlayingItems.delete(child.dataset.npId);
+        child.remove();
+      }
+    });
+    $("#np-empty").hidden = items.length > 0;
+    const active = items.filter((item) => item.state === "playing" || item.state === "paused");
+    const totalRate = active.reduce((sum, item) => sum + (item.rate || 0), 0);
+    $("#np-summary").textContent = active.length
+      ? `${t(active.length > 1 ? "{n} lectures" : "{n} lecture", { n: active.length })} · ${t("{rate} au total", { rate: bitRate(totalRate) })}`
+      : "";
+  };
+  let nowPlayingTimer = null;
+  let nowPlayingBusy = false;
+  const refreshNowPlaying = async () => {
+    if (!container.isConnected) {
+      clearInterval(nowPlayingTimer);
+      return;
+    }
+    if (nowPlayingBusy || document.visibilityState === "hidden") return;
+    nowPlayingBusy = true;
+    try {
+      const data = await api("now-playing");
+      if (container.isConnected) paintNowPlaying(data.items || []);
+    } catch {
+      // Transient errors keep the last state; the next refresh retries.
+    } finally {
+      nowPlayingBusy = false;
+    }
+  };
+  nowPlayingTimer = setInterval(refreshNowPlaying, 3000);
+  refreshNowPlaying();
+
   $("#stats-refresh").onclick = () => run(() => load(true));
   // Repaint the timeline to the tile width on resize (debounced, single handler).
   if (statsResizeHandler) window.removeEventListener("resize", statsResizeHandler);

@@ -51,7 +51,7 @@ async function fetchManifest(addon, upstream) {
  * Si la reponse contient des streams HTTP(S), leurs URLs sont reecrites vers /play.
  * Retourne { status, contentType, body(Buffer) }.
  */
-async function fetchResource(addon, restPath, query, baseUrl, upstream) {
+async function fetchResource(addon, restPath, query, baseUrl, upstream, options = {}) {
   const target = addonBase(addon.manifestUrl) + '/' + restPath + (query || '');
   const { res } = await request(target, { upstream, headers: { accept: 'application/json' } });
   const status = res.statusCode || 502;
@@ -75,7 +75,7 @@ async function fetchResource(addon, restPath, query, baseUrl, upstream) {
   if (data && Array.isArray(data.streams)) {
     total = data.streams.length;
     data.streams = data.streams.map((s) => {
-      const out = rewriteStream(s, baseUrl, addon.id);
+      const out = rewriteStream(s, baseUrl, addon.id, options.onToken);
       if (out !== s && out.url && out.url.startsWith(baseUrl + '/play')) proxied++;
       return out;
     });
@@ -90,8 +90,12 @@ async function fetchResource(addon, restPath, query, baseUrl, upstream) {
   };
 }
 
-/** Reecrit un stream: url HTTP(S) -> passe par /play. Les torrents (infoHash) sont laisses tels quels. */
-function rewriteStream(stream, baseUrl, addonId) {
+/**
+ * Reecrit un stream: url HTTP(S) -> passe par /play. Les torrents (infoHash) sont laisses tels quels.
+ * onToken(token, stream) : optionnel, permet a l'appelant d'associer le token au stream
+ * d'origine (nom de release, taille...) sans l'inclure dans le token.
+ */
+function rewriteStream(stream, baseUrl, addonId, onToken) {
   if (!stream || typeof stream.url !== 'string' || !/^https?:\/\//i.test(stream.url)) {
     return stream; // torrent (infoHash), externalUrl, ytId... : non proxifiable ici
   }
@@ -101,6 +105,9 @@ function rewriteStream(stream, baseUrl, addonId) {
     : null;
 
   const token = encodeToken(stream.url, reqHeaders, addonId);
+  if (onToken) {
+    try { onToken(token, stream); } catch { /* best-effort, ne bloque jamais la reponse */ }
+  }
   const out = { ...stream, url: `${baseUrl}/play?t=${token}` };
 
   // On gere les headers nous-memes cote /play : on les retire du stream.
