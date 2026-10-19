@@ -38,14 +38,12 @@ Dashboard auto-hébergé pour gérer plusieurs comptes et profils [Nuvio](https:
     </td>
   </tr>
   <tr>
-    <td colspan="2" valign="top">
+    <td width="50%" valign="middle">
       <a href="docs/screenshots/profil-sources-suivi.png"><img src="docs/screenshots/profil-sources-suivi.png" alt="Sources de suivi du profil"></a>
       <br><sub><b>Sources de suivi</b> — Trakt et Simkl associés par profil, historique Nuvio inclus ou non dans les statistiques.</sub>
     </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">
-      <a href="docs/screenshots/catalogues-apercu.jpg"><img src="docs/screenshots/catalogues-apercu.jpg" alt="Aperçu des catalogues d’accueil" width="50%"></a>
+    <td width="50%" valign="top" align="center">
+      <a href="docs/screenshots/catalogues-apercu.jpg"><img src="docs/screenshots/catalogues-apercu.jpg" alt="Aperçu des catalogues d’accueil" width="45%"></a>
       <br><sub><b>Catalogues & collections</b> — aperçu de l’accueil tel qu’il s’affiche dans l’application.</sub>
     </td>
   </tr>
