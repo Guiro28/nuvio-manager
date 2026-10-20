@@ -160,6 +160,12 @@ function openDialog(html) {
 // A restore may run server-side "replace" or fall back to per-item pushes when
 // the hosted RPC denies it; the toast reflects which path ran.
 function restoreToast(result) {
+  // Single profile, or a whole account restored profile by profile (Tuvora).
+  if (result?.method === "profile" || result?.method === "profiles") {
+    const failed = result.result?.errors?.length || 0;
+    const label = result.method === "profile" ? t("Profil restauré") : t("Compte restauré");
+    return toast(failed ? t("{label}, sauf {n} élément(s) en erreur.", { label, n: failed }) : label);
+  }
   if (result?.method === "fallback") {
     const failed = result.result?.errors?.length || 0;
     return toast(
@@ -1636,76 +1642,221 @@ async function renderProxy() {
         })),
   );
 }
-function renderBackups() {
-  const activeAccount = state.accounts.find((item) => item.id === accountId);
-  const backupActions = accountId
-    ? `<div class="actions">${btn(t("Charger depuis le PC"), "backup-upload")}${btn(t("Sauvegarder le compte actif"), "backup", "primary")}</div>`
-    : "";
-  $("#content").innerHTML =
-    heading(
-      t("nav.backups"),
-      t("Jusqu’à trois points de retour chiffrés par compte Nuvio."),
-      backupActions,
-    ) +
-    `<div class="hint">${esc(t("Chaque compte conserve ses trois sauvegardes les plus récentes. Une restauration remplace les données synchronisées du compte et crée d’abord une sauvegarde de sécurité."))}</div><div class="list">${state.backups.map((b) => `<article class="addon"><div class="addon-top"><div><strong>${esc(t(b.reason))}</strong><p class="muted">${esc(state.accounts.find((item) => item.id === b.accountId)?.name || b.email)} · ${esc(new Date(b.at).toLocaleString(getLang()))}</p></div><div class="actions"><a href="/api/backup/download?id=${encodeURIComponent(b.id)}" download>${esc(t("Télécharger"))}</a>${state.accounts.some((item) => item.id === b.accountId) ? `<button data-backup-restore="${esc(b.id)}">${esc(t("Restaurer"))}</button>` : ""}<button data-backup-delete="${esc(b.id)}" class="danger">${esc(t("Supprimer"))}</button></div></div></article>`).join("") || `<div class="empty-inline">${esc(t("Les sauvegardes apparaîtront ici après votre premier enregistrement."))}</div>`}</div>`;
-  if ($("#backup"))
-    $("#backup").onclick = () =>
+// Backups — one block per account, one row per profile (avatar, last backup,
+// "Restaurer…"). A backup always covers the whole account, so any backup can be
+// restored for a single profile (all or some parts) or for the whole account.
+const BACKUP_PARTS = [
+  ["identity", "Identité (nom, avatar, couleur)"],
+  ["addons", "Addons"],
+  ["plugins", "Plugins"],
+  ["tv", "Réglages TV"],
+  ["mobile", "Réglages Mobile"],
+  ["catalogs", "Catalogues d’accueil"],
+  ["collections", "Collections"],
+];
+const backupDate = (at) => new Date(at).toLocaleString(getLang(), { dateStyle: "medium", timeStyle: "short" });
+const backupAgo = (at) => {
+  const elapsed = new Date(at).getTime() - Date.now();
+  const units = [["day", 864e5], ["hour", 36e5], ["minute", 6e4]];
+  const [unit, size] = units.find(([, ms]) => Math.abs(elapsed) >= ms) || ["minute", 6e4];
+  return new Intl.RelativeTimeFormat(getLang(), { numeric: "auto" }).format(Math.round(elapsed / size), unit);
+};
+const backupLabel = (b) => `${t(b.reason)}${b.manual ? ` · ${t("manuelle")}` : ""}`;
+const accountBackups = (id) => state.backups.filter((b) => b.accountId === id);
+// Same rule as the server (server/backups.js · profileWindow): a profile's
+// automatic backups are those of its own changes plus the account-wide ones, 15
+// newest; its manual backups are always listed.
+const BACKUPS_PER_PROFILE = 15;
+const profileBackups = (id, profileId) => {
+  const all = accountBackups(id).filter((b) => (b.profiles || []).some((p) => p.profileId === profileId));
+  const auto = all.filter((b) => !b.manual && (b.profileId == null || b.profileId === profileId)).slice(0, BACKUPS_PER_PROFILE);
+  const keep = new Set([...auto, ...all.filter((b) => b.manual)]);
+  return all.filter((b) => keep.has(b));
+};
+// Accounts are folded; the open ones (and their loaded profiles) survive the
+// re-render that follows an action.
+const openBackupAccounts = new Set();
+const backupProfilesCache = new Map();
+const backupChoices = (list) =>
+  `<div class="bk-choices">${list
+    .map((b, i) => `<label class="bk-choice"><input type="radio" name="bk-choice" value="${esc(b.id)}" ${i ? "" : "checked"}><span><strong>${esc(backupDate(b.at))}</strong><span class="muted"> · ${esc(backupLabel(b))}</span></span></label>`)
+    .join("")}</div>`;
+
+async function renderBackups() {
+  const c = $("#content");
+  c.innerHTML =
+    heading(t("nav.backups"), t("Restaurez un profil ou tout le compte.")) +
+    (state.accounts.length
+      ? state.accounts
+          .map((a) => {
+            const list = accountBackups(a.id);
+            const open = openBackupAccounts.has(a.id);
+            const meta = list[0] ? t("Dernière sauvegarde {ago}", { ago: backupAgo(list[0].at) }) : t("Aucune sauvegarde");
+            return `<section class="panel bk-account${open ? " open" : ""}"><div class="bk-account-head"><button type="button" class="bk-account-toggle" data-bk-toggle="${esc(a.id)}" aria-expanded="${open}"><span class="bk-chevron" aria-hidden="true">›</span><strong>${esc(a.name || a.email)}</strong>${accountTypeBadge(a.provider)}<span class="muted bk-account-meta">${esc(meta)}</span></button><div class="actions"><button data-bk-history="${esc(a.id)}">${esc(t("Historique ({n})", { n: list.length }))}</button><button data-bk-restore-account="${esc(a.id)}" ${list.length ? "" : "disabled"}>${esc(t("Restaurer le compte…"))}</button><button class="primary" data-bk-create="${esc(a.id)}">${esc(t("Sauvegarder le compte"))}</button></div></div><div class="bk-profiles" data-bk-profiles="${esc(a.id)}" ${open ? "" : "hidden"}></div></section>`;
+          })
+          .join("") +
+        `<p class="hint">${esc(t("Une sauvegarde de sécurité est créée avant chaque restauration et l’historique de visionnage n’est jamais modifié. Chaque profil garde ses quinze dernières sauvegardes automatiques ; les sauvegardes manuelles sont conservées."))}</p>`
+      : `<div class="empty-inline">${esc(t("Connectez un compte pour sauvegarder ses profils."))}</div>`);
+
+  const paintProfiles = (a, host, profiles) => {
+    host.innerHTML =
+      profiles
+        .map((p) => {
+          const list = profileBackups(a.id, p.profile_index);
+          const info = list[0]
+            ? t("Dernière sauvegarde {ago} · {n} disponible(s)", { ago: backupAgo(list[0].at), n: list.length })
+            : t("Aucune sauvegarde");
+          return `<div class="bk-profile">${profileAvatar(p)}<div class="bk-profile-info"><strong>${esc(p.name)}</strong><span class="muted">${esc(info)}</span></div><button data-bk-restore-profile="${esc(a.id)}" data-profile="${p.profile_index}" data-name="${esc(p.name)}" ${list.length ? "" : "disabled"}>${esc(t("Restaurer…"))}</button></div>`;
+        })
+        .join("") || `<p class="muted">${esc(t("Aucun profil."))}</p>`;
+    host.querySelectorAll("[data-bk-restore-profile]").forEach((button) => {
+      button.onclick = () => restoreProfileDialog(a, Number(button.dataset.profile), button.dataset.name);
+    });
+  };
+  // Profiles (avatars, names) are loaded the first time an account is opened.
+  const loadProfiles = (a) => {
+    const host = c.querySelector(`[data-bk-profiles="${CSS.escape(a.id)}"]`);
+    if (backupProfilesCache.has(a.id)) return paintProfiles(a, host, backupProfilesCache.get(a.id));
+    host.innerHTML = `<p class="muted">${esc(t("Chargement des profils…"))}</p>`;
+    api("profiles?accountId=" + encodeURIComponent(a.id))
+      .then((profiles) => {
+        backupProfilesCache.set(a.id, profiles);
+        if (host.isConnected) paintProfiles(a, host, profiles);
+      })
+      .catch((error) => {
+        if (host.isConnected) host.innerHTML = `<p class="error">${esc(error.message)}</p>`;
+      });
+  };
+  for (const a of state.accounts) if (openBackupAccounts.has(a.id)) loadProfiles(a);
+
+  c.querySelectorAll("[data-bk-toggle]").forEach((toggle) => {
+    toggle.onclick = () => {
+      const a = state.accounts.find((item) => item.id === toggle.dataset.bkToggle);
+      const section = toggle.closest(".bk-account");
+      const open = !openBackupAccounts.has(a.id);
+      if (open) openBackupAccounts.add(a.id);
+      else openBackupAccounts.delete(a.id);
+      section.classList.toggle("open", open);
+      toggle.setAttribute("aria-expanded", String(open));
+      section.querySelector("[data-bk-profiles]").hidden = !open;
+      if (open) loadProfiles(a);
+    };
+  });
+  c.querySelectorAll("[data-bk-create]").forEach((button) => {
+    button.onclick = () =>
       run(async () => {
-        await api("backup/create", { accountId });
+        await api("backup/create", { accountId: button.dataset.bkCreate });
         await render();
         toast(t("Sauvegarde créée"));
       });
-  if ($("#backup-upload"))
-    $("#backup-upload").onclick = () => {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".json,application/json";
-      input.onchange = async () => {
-        const file = input.files?.[0];
-        if (!file) return;
-        if (file.size > 20_000_000) return toast(t("Le fichier dépasse la limite de 20 Mo."));
-        let snapshot;
-        try {
-          snapshot = JSON.parse(await file.text());
-        } catch {
-          return toast(t("Ce fichier ne contient pas un JSON valide."));
-        }
-        openDialog(`<h2>${esc(t("Restaurer cette sauvegarde ?"))}</h2><p>${t("Le fichier <strong>{name}</strong> remplacera les données synchronisées du compte <strong>{account}</strong>.", { name: esc(file.name), account: esc(activeAccount?.name || activeAccount?.email || t("actif")) })}</p><p class="hint warning">${esc(t("Une sauvegarde de sécurité sera créée automatiquement avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="restore-uploaded-backup" class="danger">${esc(t("Restaurer le compte"))}</button></div>`);
-        $("#restore-uploaded-backup").onclick = () => run(async () => {
-          const result = await api("backup/restore-file", { accountId, backup: snapshot });
+  });
+  c.querySelectorAll("[data-bk-restore-account]").forEach((button) => {
+    button.onclick = () => restoreAccountDialog(state.accounts.find((a) => a.id === button.dataset.bkRestoreAccount));
+  });
+  c.querySelectorAll("[data-bk-history]").forEach((button) => {
+    button.onclick = () => backupHistoryDialog(state.accounts.find((a) => a.id === button.dataset.bkHistory));
+  });
+}
+
+function restoreProfileDialog(a, profileId, name) {
+  const list = profileBackups(a.id, profileId);
+  openDialog(
+    `<h2>${esc(t("Restaurer {name}", { name }))}</h2><p class="muted bk-label">${esc(t("Revenir à"))}</p>${backupChoices(list)}<p class="muted bk-label">${esc(t("Éléments"))}</p><label class="check-label bk-all"><input type="checkbox" id="bk-all" checked>${esc(t("Tout"))}</label><div class="bk-parts" id="bk-parts"></div><p class="hint">${esc(t("Seul ce profil est modifié. Une sauvegarde de sécurité est créée avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="bk-go" class="primary">${esc(t("Restaurer"))}</button></div>`,
+  );
+  const selected = () => list.find((b) => b.id === $("input[name=bk-choice]:checked")?.value) || list[0];
+  const syncAll = () => {
+    const boxes = $$("#bk-parts [data-part]:not(:disabled)");
+    $("#bk-all").checked = boxes.length > 0 && boxes.every((input) => input.checked);
+    $("#bk-go").disabled = !boxes.some((input) => input.checked);
+  };
+  const paintParts = () => {
+    const summary = (selected()?.profiles || []).find((p) => p.profileId === profileId)?.parts || {};
+    const previous = new Map($$("#bk-parts [data-part]").map((input) => [input.dataset.part, input.checked]));
+    $("#bk-parts").innerHTML = BACKUP_PARTS.map(([part, label]) => {
+      const value = summary[part];
+      const available = value !== null && value !== undefined && value !== false;
+      const count = typeof value === "number" ? ` (${value})` : "";
+      const checked = available && (previous.get(part) ?? $("#bk-all").checked);
+      return `<label class="check-label${available ? "" : " muted"}"><input type="checkbox" data-part="${part}" ${checked ? "checked" : ""} ${available ? "" : "disabled"}>${esc(t(label))}${esc(count)}${available ? "" : ` · ${esc(t("absent de cette sauvegarde"))}`}</label>`;
+    }).join("");
+    $$("#bk-parts [data-part]").forEach((input) => (input.onchange = syncAll));
+    syncAll();
+  };
+  $("#bk-all").onchange = () => {
+    $$("#bk-parts [data-part]:not(:disabled)").forEach((input) => (input.checked = $("#bk-all").checked));
+    syncAll();
+  };
+  $$("input[name=bk-choice]").forEach((input) => (input.onchange = paintParts));
+  paintParts();
+  $("#bk-go").onclick = () =>
+    run(async () => {
+      const parts = $$("#bk-parts [data-part]:checked").map((input) => input.dataset.part);
+      const result = await api("backup/restore-profile", { accountId: a.id, id: selected().id, profileId, parts });
+      $("#dialog").close();
+      await render();
+      restoreToast(result);
+    });
+}
+
+function restoreAccountDialog(a) {
+  const list = accountBackups(a.id);
+  openDialog(
+    `<h2>${esc(t("Restaurer le compte {name}", { name: a.name || a.email }))}</h2><p class="muted bk-label">${esc(t("Revenir à"))}</p>${backupChoices(list)}<p class="hint warning">${esc(t("Tous les profils du compte reprennent l’état de la sauvegarde. Une sauvegarde de sécurité est créée avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="bk-go" class="danger">${esc(t("Restaurer le compte"))}</button></div>`,
+  );
+  $("#bk-go").onclick = () =>
+    run(async () => {
+      const result = await api("backup/restore", { accountId: a.id, id: $("input[name=bk-choice]:checked")?.value });
+      $("#dialog").close();
+      await render();
+      restoreToast(result);
+    });
+}
+
+function backupHistoryDialog(a) {
+  const list = accountBackups(a.id);
+  openDialog(
+    `<h2>${esc(t("Sauvegardes de {name}", { name: a.name || a.email }))}</h2><div class="bk-history">${
+      list
+        .map((b) => `<div class="bk-history-row"><div><strong>${esc(backupDate(b.at))}</strong><span class="muted"> · ${esc(backupLabel(b))}</span></div><div class="actions"><a href="/api/backup/download?id=${encodeURIComponent(b.id)}" download>${esc(t("Télécharger"))}</a><button data-bk-delete="${esc(b.id)}" class="danger">${esc(t("Supprimer"))}</button></div></div>`)
+        .join("") || `<p class="muted">${esc(t("Aucune sauvegarde pour ce compte."))}</p>`
+    }</div><div class="dialog-actions"><button id="bk-import">${esc(t("Importer un fichier…"))}</button><button data-close>${esc(t("Fermer"))}</button></div>`,
+  );
+  $$("[data-bk-delete]").forEach((button) => {
+    button.onclick = () =>
+      run(async () => {
+        await api("backup/delete", { id: button.dataset.bkDelete });
+        await render();
+        backupHistoryDialog(a);
+        toast(t("Sauvegarde supprimée"));
+      });
+  });
+  $("#bk-import").onclick = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 20_000_000) return toast(t("Le fichier dépasse la limite de 20 Mo."));
+      let snapshot;
+      try {
+        snapshot = JSON.parse(await file.text());
+      } catch {
+        return toast(t("Ce fichier ne contient pas un JSON valide."));
+      }
+      openDialog(`<h2>${esc(t("Restaurer cette sauvegarde ?"))}</h2><p>${t("Le fichier <strong>{name}</strong> remplacera les données synchronisées du compte <strong>{account}</strong>.", { name: esc(file.name), account: esc(a.name || a.email) })}</p><p class="hint warning">${esc(t("Une sauvegarde de sécurité sera créée automatiquement avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="restore-uploaded-backup" class="danger">${esc(t("Restaurer le compte"))}</button></div>`);
+      $("#restore-uploaded-backup").onclick = () =>
+        run(async () => {
+          const result = await api("backup/restore-file", { accountId: a.id, backup: snapshot });
           $("#dialog").close();
           await render();
           restoreToast(result);
         });
-      };
-      input.click();
     };
-  $$('[data-backup-restore]').forEach((button) => {
-    button.onclick = () => {
-      const item = state.backups.find((backup) => backup.id === button.dataset.backupRestore),
-        target = state.accounts.find((account) => account.id === item?.accountId);
-      openDialog(`<h2>${esc(t("Restaurer cette sauvegarde ?"))}</h2><p>${t("Les données synchronisées du compte <strong>{account}</strong> seront remplacées par la sauvegarde du {date}.", { account: esc(target?.name || target?.email || item?.email), date: esc(new Date(item.at).toLocaleString(getLang())) })}</p><p class="hint warning">${esc(t("Une sauvegarde de sécurité sera créée automatiquement avant la restauration."))}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="restore-backup" class="danger">${esc(t("Restaurer le compte"))}</button></div>`);
-      $("#restore-backup").onclick = () => run(async () => {
-        const result = await api("backup/restore", { accountId: item.accountId, id: item.id });
-        $("#dialog").close();
-        await render();
-        restoreToast(result);
-      });
-    };
-  });
-  $$('[data-backup-delete]').forEach((button) => {
-    button.onclick = () => {
-      const item = state.backups.find((backup) => backup.id === button.dataset.backupDelete);
-      openDialog(`<h2>${esc(t("Supprimer cette sauvegarde ?"))}</h2><p>${t("La sauvegarde du {date} sera supprimée définitivement.", { date: esc(new Date(item.at).toLocaleString(getLang())) })}</p><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="delete-backup" class="danger">${esc(t("Supprimer"))}</button></div>`);
-      $("#delete-backup").onclick = () => run(async () => {
-        await api("backup/delete", { id: item.id });
-        $("#dialog").close();
-        await render();
-        toast(t("Sauvegarde supprimée"));
-      });
-    };
-  });
+    input.click();
+  };
 }
+
 // Inline Tuvora brand logo (amber play square) — mirrors how Trakt/Simkl are
 // shipped as inline SVG so no external asset is needed.
 const TUVORA_LOGO = `<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="48" y="48" width="416" height="416" rx="52" fill="#f0b429"/><path fill="#141414" d="M204 164c-15 0-27 12-27 27v130c0 21 23 34 41 23l108-65c17-10 17-34 0-44l-108-65c-4-2-9-6-14-6z"/></svg>`;

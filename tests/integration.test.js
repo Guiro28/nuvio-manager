@@ -297,7 +297,16 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   for (let index = 0; index < 4; index++)
     assert.equal((await call("backup/create", { accountId: "test-user" })).status, 200);
   const limitedBackups = await call("state");
-  assert.equal(limitedBackups.data.backups.filter((item) => item.accountId === "test-user").length, 3);
+  const accountBackups = limitedBackups.data.backups.filter((item) => item.accountId === "test-user");
+  // Manual backups are kept; only automatic ones rotate (10 per account).
+  assert.equal(accountBackups.filter((item) => item.manual).length, 4);
+  assert.ok(accountBackups.filter((item) => !item.manual).length <= 10);
+  assert.ok(accountBackups.every((item) => Array.isArray(item.profiles)));
+  // A profile that is not in the backup cannot be restored from it.
+  assert.equal(
+    (await call("backup/restore-profile", { accountId: "test-user", id: accountBackups[0].id, profileId: 6, parts: ["addons"] })).status,
+    400,
+  );
   const deletedBackupId = limitedBackups.data.backups[0].id;
   assert.equal((await call("backup/delete", { id: deletedBackupId })).status, 200);
   assert.equal((await call("backup/download?id=" + deletedBackupId)).status, 404);

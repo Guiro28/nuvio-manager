@@ -5,6 +5,7 @@ import { enrichActivity } from "./tmdb.js";
 import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
 import { createHistoryStore } from "./history-store.js";
 import { createNowPlaying } from "./now-playing.js";
+import { RESTORE_PARTS, expiredBackups, profileSlice, profilesInSnapshot } from "./backups.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestLogo } from "./manifest.js";
 import { createIntegratedProxy, normalizeProxyUrl, proxySummary, normalizeManifestUrl } from "./integrated-proxy.js";
@@ -668,7 +669,6 @@ async function addSession(t, providerId = "nuvio") {
   log.info("account", isNew ? "compte connecté" : "session renouvelée", { account: a.email || a.id, provider: a.provider });
   return { id: a.id, email: a.email };
 }
-const MAX_BACKUPS_PER_ACCOUNT = 3;
 const validateBackupSnapshot = (snapshot) => {
   assert(snapshot && typeof snapshot === "object" && !Array.isArray(snapshot), "Fichier de sauvegarde Nuvio invalide");
   assert(snapshot.format === "nuvio_account_backup", "Format de sauvegarde Nuvio incompatible");
@@ -677,7 +677,7 @@ const validateBackupSnapshot = (snapshot) => {
   return snapshot;
 };
 function pruneBackups(accountId) {
-  const expired = state.backups.filter((item) => item.accountId === accountId).slice(MAX_BACKUPS_PER_ACCOUNT);
+  const expired = expiredBackups(state.backups, accountId);
   if (expired.length) {
     const ids = new Set(expired.map((item) => item.id));
     state.backups = state.backups.filter((item) => !ids.has(item.id));
@@ -688,11 +688,56 @@ function persistBackups(expired = []) {
   save();
   expired.forEach((item) => db.remove("backup-" + item.id));
 }
-async function backup(a, reason) {
-  // Some providers (Tuvora) have no export RPC; skip the safety snapshot rather
-  // than failing the edit that triggered it.
-  if (!providerOf(a.provider).canBackup) return null;
-  const snapshot = await rpc("sync_export_account_backup", {}, await token(a), a.provider);
+// Providers without an export RPC (Tuvora): the manager builds the same snapshot
+// format from the per-profile pulls it already uses for the profile editor. A
+// section it cannot read is listed in data.missing so a restore skips it instead
+// of wiping the profile.
+async function exportViaPull(a) {
+  const t = await token(a);
+  const profiles = await rpc("sync_pull_profiles", {}, t, a.provider);
+  const data = { profiles, addons: [], plugins: [], profile_settings_blobs: [], home_catalog_settings: [], collections: [], missing: [] };
+  const first = (rows) => (Array.isArray(rows) ? rows[0] : rows) || null;
+  for (const p of profiles) {
+    const pid = Number(p.profile_index);
+    const read = async (part, fn) => {
+      try {
+        return await fn();
+      } catch (error) {
+        data.missing.push(`${pid}:${part}`);
+        log.warn("backup", "section illisible, ignorée", { account: a.email || a.id, profile: pid, part, error: error.message });
+        return undefined;
+      }
+    };
+    const rest = (table) =>
+      call(`/rest/v1/${table}?user_id=eq.${encodeURIComponent(p.user_id)}&profile_id=eq.${pid}&order=sort_order.asc`, null, t, "GET", a.provider);
+    const [addons, plugins, tv, mobile, catalogs, collections] = await Promise.all([
+      read("addons", () => rest("addons")),
+      read("plugins", () => rest("plugins")),
+      read("tv", () => rpc("sync_pull_profile_settings_blob", { p_profile_id: pid, p_platform: "tv" }, t, a.provider)),
+      read("mobile", () => rpc("sync_pull_profile_settings_blob", { p_profile_id: pid, p_platform: "mobile" }, t, a.provider)),
+      read("catalogs", () => rpc("sync_pull_home_catalog_settings", { p_profile_id: pid, p_platform: "home_catalog_shared" }, t, a.provider)),
+      read("collections", () => rpc("sync_pull_collections", { p_profile_id: pid }, t, a.provider)),
+    ]);
+    for (const row of addons || []) data.addons.push({ ...row, profile_id: pid });
+    for (const row of plugins || []) data.plugins.push({ ...row, profile_id: pid });
+    for (const [platform, rows] of [["tv", tv], ["mobile", mobile]]) {
+      const row = first(rows);
+      if (row?.settings_json) data.profile_settings_blobs.push({ platform, profile_id: pid, settings_json: row.settings_json, updated_at: row.updated_at ?? null });
+    }
+    const catalogRow = first(catalogs);
+    if (catalogRow?.settings_json) data.home_catalog_settings.push({ profile_id: pid, platform: "home_catalog_shared", settings_json: catalogRow.settings_json });
+    const collectionRow = first(collections);
+    if (collectionRow) data.collections.push({ profile_id: pid, collections_json: collectionRow.collections_json ?? collectionRow.collectionsJson ?? [] });
+  }
+  return { format: "nuvio_account_backup", version: 1, scope: "manager", exported_at: new Date().toISOString(), data };
+}
+// Snapshot of the whole account. `profileId` tags which profile the change that
+// triggered it concerns; `manual` backups are kept until deleted by hand.
+async function backup(a, reason, { manual = false, profileId = null } = {}) {
+  const native = providerOf(a.provider).canBackup;
+  const snapshot = native
+    ? await rpc("sync_export_account_backup", {}, await token(a), a.provider)
+    : await exportViaPull(a);
   const id = crypto.randomUUID();
   db.write("backup-" + id, snapshot);
   state.backups.unshift({
@@ -701,15 +746,30 @@ async function backup(a, reason) {
     email: a.email,
     at: new Date().toISOString(),
     reason,
+    manual: Boolean(manual),
+    profileId: Number.isFinite(Number(profileId)) && profileId !== null ? Number(profileId) : null,
+    source: native ? "nuvio" : "manager",
+    profiles: profilesInSnapshot(snapshot),
   });
   persistBackups(pruneBackups(a.id));
-  log.debug("backup", "sauvegarde créée", { account: a.email || a.id, reason });
+  log.debug("backup", "sauvegarde créée", { account: a.email || a.id, reason, manual: Boolean(manual), profile: profileId ?? "" });
   return id;
 }
+// Older entries: per-profile summary read once from their snapshot, and the
+// manual flag inferred from the reason.
 {
+  let migrated = 0;
+  for (const item of state.backups) {
+    if (Array.isArray(item.profiles)) continue;
+    item.profiles = profilesInSnapshot(db.read("backup-" + item.id, null));
+    item.manual ??= item.reason === "Sauvegarde manuelle";
+    item.profileId ??= null;
+    item.source ??= "nuvio";
+    migrated++;
+  }
   const expired = [...new Set(state.backups.map((item) => item.accountId).filter(Boolean))]
     .flatMap((accountId) => pruneBackups(accountId));
-  if (expired.length) persistBackups(expired);
+  if (migrated || expired.length) persistBackups(expired);
 }
 // Fallback restore for hosted instances that deny sync_restore_account_backup:
 // re-push the synced settings from the snapshot via the per-item RPCs. Restores
@@ -766,6 +826,81 @@ async function restoreViaPush(a, snapshot) {
       restored.settings++;
   return { restored, errors };
 }
+// Restore one profile (all or some parts) from an account snapshot, through the
+// same per-profile writes the editor uses — other profiles are never touched.
+// Proxied addons get valid relay links back for this profile (a link revoked
+// since the backup is re-minted). Parts the backup has nothing for are skipped.
+async function restoreProfile(a, snapshot, profileId, parts) {
+  const t = await token(a);
+  const slice = profileSlice(snapshot, profileId);
+  const done = [], skipped = [], errors = [];
+  const step = async (part, available, fn) => {
+    if (!parts.includes(part)) return;
+    if (available === null || available === undefined) return skipped.push(part);
+    try {
+      await fn();
+      done.push(part);
+    } catch (error) {
+      errors.push(`${part}: ${error.message}`);
+    }
+  };
+  await step("identity", slice.identity, async () => {
+    const p = slice.identity;
+    const avatarId = p.avatar_id || null;
+    const patch = {
+      name: String(p.name || `Profil ${profileId}`),
+      avatar_color_hex: /^#[0-9a-f]{6}$/i.test(p.avatar_color_hex || "") ? p.avatar_color_hex.toUpperCase() : "#1E88E5",
+      uses_primary_addons: Boolean(p.uses_primary_addons),
+      uses_primary_plugins: Boolean(p.uses_primary_plugins),
+      ...(avatarId ? { avatar_id: avatarId } : { avatar_url: p.avatar_url || null }),
+    };
+    if (isTuvora(a)) await patchProfileRow(a, t, profileId, patch);
+    else
+      await rpc(
+        "sync_patch_profile",
+        {
+          p_profile_id: profileId,
+          p_name: patch.name,
+          p_avatar_color_hex: patch.avatar_color_hex,
+          p_uses_primary_addons: patch.uses_primary_addons,
+          p_uses_primary_plugins: patch.uses_primary_plugins,
+          p_avatar_url: avatarId ? null : patch.avatar_url,
+          p_avatar_url_provided: !avatarId,
+          p_avatar_id: avatarId,
+          p_avatar_id_provided: Boolean(avatarId),
+        },
+        t,
+        a.provider,
+      );
+  });
+  await step("addons", slice.addons, async () => {
+    const rows = await remapRelayAddons(slice.addons, { accountId: a.id, profileId });
+    await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: rows, ...originId(a) }, t, a.provider);
+    addonProxy.reconcile(a.id, profileId, rows.map((row) => row.url));
+    historyStore.refreshAddons(`${a.id}:${profileId}`);
+  });
+  await step("plugins", slice.plugins, () =>
+    rpc("sync_push_plugins", { p_profile_id: profileId, p_plugins: slice.plugins, ...originId(a) }, t, a.provider));
+  for (const platform of ["tv", "mobile"])
+    await step(platform, slice[platform], async () => {
+      if (isTuvora(a))
+        await rpc("sync_push_profile_settings_blob", { p_profile_id: profileId, p_platform: platform, p_settings_json: slice[platform], ...originId(a) }, t, a.provider);
+      else {
+        const current = (await rpc("sync_pull_profile_settings_blob", { p_profile_id: profileId, p_platform: platform }, t, a.provider))[0];
+        await rpc(
+          "sync_push_profile_settings_blob_guarded",
+          { p_profile_id: profileId, p_platform: platform, p_settings_json: slice[platform], p_expected_updated_at: current?.updated_at || null },
+          t,
+          a.provider,
+        );
+      }
+    });
+  await step("catalogs", slice.catalogs, () => pushHomeCatalogSettings(t, profileId, slice.catalogs, a.provider, originId(a)));
+  await step("collections", slice.collections, () => pushCollections(t, profileId, slice.collections, a.provider, originId(a)));
+  statisticsCache.clear();
+  return { done, skipped, errors };
+}
+
 function normalizeUrl(value) {
   const u = new URL(String(value || "").replace(/^stremio:\/\//i, "https://"));
   assert(
@@ -1080,7 +1215,7 @@ const server = http.createServer(async (req, res) => {
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
         "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/usage", "/api/library/assign-many", "/api/library/set-modes",
-        "/api/backup/create", "/api/backup/delete", "/api/backup/restore",
+        "/api/backup/create", "/api/backup/delete", "/api/backup/restore", "/api/backup/restore-profile",
         "/api/backup/restore-file", "/api/backup/download",
       ]);
       if (ADMIN_ONLY.has(route)) assert(isAdmin, "Accès réservé à l’administrateur", 403);
@@ -1444,7 +1579,7 @@ const server = http.createServer(async (req, res) => {
         assert(Array.isArray(b.playlists), "Liste de playlists invalide", 400);
         let backupId = null;
         try {
-          backupId = await backup(a, "Modification des playlists IPTV");
+          backupId = await backup(a, "Modification des playlists IPTV", { profileId: Number(b.profileId) });
         } catch {
           /* Tuvora may not expose the backup RPC; the save still proceeds. */
         }
@@ -1528,7 +1663,7 @@ const server = http.createServer(async (req, res) => {
         assert(Array.isArray(b.collections), "Liste de collections invalide", 400);
         let backupId = null;
         try {
-          backupId = await backup(a, "Modification des collections");
+          backupId = await backup(a, "Modification des collections", { profileId });
         } catch {
           /* Tuvora may not expose the backup RPC; the save still proceeds. */
         }
@@ -1880,7 +2015,7 @@ const server = http.createServer(async (req, res) => {
         assert(!(avatarId && avatarUrl), "Choisissez un avatar Nuvio ou une URL personnalisée");
         const normalizedAvatarUrl = avatarUrl ? normalizeUrl(avatarUrl) : null;
         const t = await token(a);
-        const id = await backup(a, "Modification du profil");
+        const id = await backup(a, "Modification du profil", { profileId: Number(b.profileId) });
         const patch = {
           name: b.name.trim(),
           avatar_color_hex: b.color.toUpperCase(),
@@ -2059,7 +2194,7 @@ const server = http.createServer(async (req, res) => {
             const matchIndex = rows.findIndex((x) => addonManifestKey(x.url) === manifestKey);
             if (matchIndex >= 0) rows[matchIndex] = { ...rows[matchIndex], url: installUrl, name: item.name };
             else rows.push({ url: installUrl, name: item.name, enabled: true, sort_order: rows.length });
-            const backupId = await backup(a, "Avant attribution multi-profils");
+            const backupId = await backup(a, "Avant attribution multi-profils", { profileId });
             await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: rows, ...originId(a) }, t, a.provider);
             addonProxy.reconcile(a.id, profileId, rows.map((x) => x.url));
             historyStore.refreshAddons(`${a.id}:${profileId}`);
@@ -2114,7 +2249,7 @@ const server = http.createServer(async (req, res) => {
               else rows.push({ url: installUrl, name: item.name, enabled: true, sort_order: rows.length });
               desired = rows;
             }
-            const backupId = await backup(a, "Avant modification des modes de proxy");
+            const backupId = await backup(a, "Avant modification des modes de proxy", { profileId });
             await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: desired, ...originId(a) }, t, a.provider);
             addonProxy.reconcile(a.id, profileId, desired.map((x) => x.url));
             historyStore.refreshAddons(`${a.id}:${profileId}`);
@@ -2282,7 +2417,7 @@ const server = http.createServer(async (req, res) => {
             "Le profil a changé depuis l’aperçu. Recharge et recommence.",
             409,
           );
-          backupId = await backup(a, "Avant enregistrement / copie");
+          backupId = await backup(a, "Avant enregistrement / copie", { profileId: p.profileId });
           for (const [part, value] of Object.entries(p.desired)) {
             if (part === "tv" || part === "mobile")
               // Tuvora has no *_guarded variant (no optimistic-lock param); it
@@ -2356,9 +2491,9 @@ const server = http.createServer(async (req, res) => {
         }
       }
       if (route === "/api/backup/create") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
         const a = account(b.accountId);
-        assert(providerOf(a.provider).canBackup, "Les sauvegardes ne sont pas disponibles pour les comptes Tuvora.", 400);
-        return json(res, { id: await backup(a, "Sauvegarde manuelle") });
+        return json(res, { id: await backup(a, "Sauvegarde manuelle", { manual: true }) });
       }
       if (route === "/api/backup/delete") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
@@ -2371,7 +2506,6 @@ const server = http.createServer(async (req, res) => {
       if (route === "/api/backup/restore" || route === "/api/backup/restore-file") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
         const a = account(b.accountId);
-        assert(providerOf(a.provider).canBackup, "Les sauvegardes ne sont pas disponibles pour les comptes Tuvora.", 400);
         let snapshot;
         if (route.endsWith("restore-file")) snapshot = validateBackupSnapshot(b.backup);
         else {
@@ -2381,6 +2515,17 @@ const server = http.createServer(async (req, res) => {
         }
         const safetyBackupId = await backup(a, "Avant restauration");
         let result, method = "rpc", rpcError = null;
+        if (snapshot.scope === "manager" || !providerOf(a.provider).canBackup) {
+          // Manager-built snapshot / no native restore (Tuvora): every profile of
+          // the backup is restored through the per-profile writes.
+          const results = [];
+          for (const { profileId } of profilesInSnapshot(snapshot))
+            results.push({ profileId, ...(await restoreProfile(a, snapshot, profileId, RESTORE_PARTS)) });
+          statisticsCache.clear();
+          const errors = results.flatMap((r) => r.errors.map((e) => `profil ${r.profileId} · ${e}`));
+          log.info("backup", "restauration du compte (par profil)", { account: a.email || a.id, profiles: results.length, errors: errors.length, safetyBackupId });
+          return json(res, { ok: true, result: { profiles: results, errors }, method: "profiles", safetyBackupId });
+        }
         try {
           result = await rpc(
             "sync_restore_account_backup",
@@ -2399,6 +2544,29 @@ const server = http.createServer(async (req, res) => {
         statisticsCache.clear();
         log.info("backup", "restauration", { account: a.email || a.id, method, safetyBackupId });
         return json(res, { ok: true, result, method, rpcError, safetyBackupId });
+      }
+      if (route === "/api/backup/restore-profile") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const a = account(b.accountId);
+        const profileId = Number(b.profileId);
+        assert(Number.isInteger(profileId) && profileId >= 1, "Profil invalide", 400);
+        const item = state.backups.find((entry) => entry.id === b.id);
+        assert(item && item.accountId === a.id, "Sauvegarde inconnue", 404);
+        const snapshot = validateBackupSnapshot(db.read("backup-" + item.id, null));
+        assert(profilesInSnapshot(snapshot).some((p) => p.profileId === profileId), "Ce profil n’est pas dans la sauvegarde", 400);
+        const parts = Array.isArray(b.parts) ? RESTORE_PARTS.filter((part) => b.parts.includes(part)) : RESTORE_PARTS;
+        assert(parts.length, "Aucun élément à restaurer", 400);
+        const ref = `${a.id}:${profileId}`;
+        assert(!locks.has(ref), "Une écriture est en cours", 409);
+        locks.add(ref);
+        try {
+          const safetyBackupId = await backup(a, "Avant restauration du profil", { profileId });
+          const result = await restoreProfile(a, snapshot, profileId, parts);
+          log.info("backup", "restauration du profil", { ref, parts: result.done.join(","), skipped: result.skipped.join(","), errors: result.errors.length, safetyBackupId });
+          return json(res, { ok: true, result, method: "profile", safetyBackupId });
+        } finally {
+          locks.delete(ref);
+        }
       }
       if (route === "/api/backup/download") {
         const id = url.searchParams.get("id");

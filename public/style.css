@@ -2420,3 +2420,35 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 :root[data-theme="light"] .np-stopped {color:#475569;}
 :root[data-theme="light"] .np-completed {color:#0369a1;}
 @media(max-width:520px){.stats-now-playing-content{grid-template-columns:76px minmax(0,1fr);gap:12px;padding:11px}.stats-now-playing-poster{width:76px;height:114px}.stats-now-playing-item{min-height:142px}}
+
+/* Sauvegardes : un bloc par compte, une ligne par profil */
+.bk-account {margin-bottom:12px;padding:12px 18px;}
+.bk-account-head {display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.bk-account.open .bk-account-head {padding-bottom:12px;border-bottom:1px solid var(--border);}
+.bk-account-toggle {display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 260px;padding:4px 0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;box-shadow:none;}
+.bk-account-toggle:hover,.bk-account-toggle:focus,.bk-account-toggle:active {background:none;box-shadow:none;transform:none;}
+.bk-account-toggle:focus-visible {outline:2px solid var(--purple-soft,#9b7bff);outline-offset:4px;border-radius:6px;}
+.bk-account-toggle:hover strong {text-decoration:underline;text-underline-offset:3px;}
+.bk-account-toggle strong {font-size:1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.bk-chevron {display:inline-block;width:14px;flex:none;color:var(--text-muted);font-size:1.1rem;line-height:1;transition:transform .15s;}
+.bk-account.open .bk-chevron {transform:rotate(90deg);}
+.bk-account-meta {font-size:.8rem;white-space:nowrap;}
+.bk-account-head .actions {display:flex;gap:8px;flex-wrap:wrap;}
+.bk-profiles > p {margin:12px 0 0;}
+.bk-profile {display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--border);}
+.bk-profile:last-child {border-bottom:0;padding-bottom:0;}
+.bk-profile .avatar {width:40px;height:40px;flex:none;}
+.bk-profile-info {display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;}
+.bk-profile-info .muted {font-size:.8rem;}
+.bk-label {margin:14px 0 6px;font-size:.8rem;}
+.bk-choices {display:flex;flex-direction:column;gap:2px;max-height:240px;overflow:auto;}
+.bk-choice {display:flex;align-items:flex-start;gap:9px;padding:7px 9px;border-radius:8px;cursor:pointer;}
+.bk-choice:hover {background:color-mix(in srgb,var(--panel) 70%,transparent);}
+.bk-choice input {margin-top:3px;}
+.bk-all {font-weight:650;}
+.bk-parts {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px;margin:6px 0 4px 22px;}
+.bk-parts .muted {opacity:.75;}
+.bk-history {display:flex;flex-direction:column;max-height:420px;overflow:auto;}
+.bk-history-row {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);}
+.bk-history-row .actions {display:flex;align-items:center;gap:10px;flex:none;}
+@media(max-width:620px){.bk-parts{grid-template-columns:1fr}.bk-history-row{flex-direction:column;align-items:flex-start}}
