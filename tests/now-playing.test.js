@@ -125,7 +125,7 @@ test("a paused player's full buffer (no reload) stays paused, never stopped", as
   assert.equal(h.item().position, 600_000);
 });
 
-test("the player hanging up is a stop after the grace window, completed at ≥ 90 %", async () => {
+test("the player hanging up is a stop after the grace window; finished at ≥ 90 % it disappears", async () => {
   const h = harness();
   await h.advance(15000);
   h.session.openConns = 0;
@@ -135,20 +135,17 @@ test("the player hanging up is a stop after the grace window, completed at ≥ 9
   assert.equal(h.item().state, "playing"); // still inside the reconnection grace window
   h.tables.progress = [{ content_id: "tt1160419", position: 9_500_000, duration: 9_960_000, last_watched: h.now() }];
   await h.advance(15000);
-  assert.equal(h.item().state, "completed");
-  assert.equal(h.item().rate, 0);
+  assert.equal(h.item(), undefined); // finished: the tile disappears at once
 });
 
-test("a stop below 90 % confirmed by Nuvio's watched list is completed", async () => {
+test("a stop below 90 % confirmed by Nuvio's watched list is finished and disappears", async () => {
   const h = harness({ type: "series", contentId: "tt0475784:1:6" });
   await h.advance(15000);
   h.session.openConns = 0;
   h.session.lastClientCloseAt = h.now();
   h.tables.watched = [{ content_id: "tt0475784", season: 1, episode: 6, watched_at: new Date(h.now()).toISOString() }];
   await h.advance(20000);
-  assert.equal(h.item().state, "completed");
-  assert.equal(h.item().kind, "episode");
-  assert.equal(h.item().season, 1);
+  assert.equal(h.item(), undefined); // finished: the tile disappears at once
 });
 
 test("a resumed playback takes its starting point from the saved progress", async () => {
@@ -235,7 +232,7 @@ test("a completed title reopened from the start plays from 0", async () => {
   h.session.lastClientCloseAt = h.now();
   h.tables.progress = [{ content_id: "tt1160419", position: 9_700_000, duration: 9_960_000, last_watched: h.now() }];
   await h.advance(20000);
-  assert.equal(h.item().state, "completed");
+  assert.equal(h.item(), undefined); // finished: hidden
   await h.advance(60000);
   h.session.openConns = 1;
   h.session.requests++;
@@ -287,4 +284,74 @@ test("a reconnect inside the grace window is not a stop", async () => {
   h.session.lastRequestAt = h.now();
   await h.advance(30000);
   assert.equal(h.item().state, "playing");
+});
+
+// Binge-watching: each episode is its own relay session on the same profile.
+// Near the end the player already holds the whole file (the transfer just ends,
+// no hang-up), Nuvio pushes the completion, then the next episode starts.
+test("binge-watching: finished episodes disappear, never stuck in pause", async () => {
+  let clock = 2_000_000;
+  const sessions = [];
+  const episode = (n, startedAt) => ({
+    id: `ep${n}`, accountId: "acc", profileId: 1, addonName: "", addonLogo: "", mode: "direct",
+    type: "series", contentId: `tt0903747:5:${n}`, release: "", source: "", size: 3e9, total: 3e9,
+    startedAt, lastRequestAt: startedAt, lastByteAt: startedAt, lastCloseAt: 0, lastClientCloseAt: 0,
+    requests: 1, openConns: 0, bytes: 40 * MB, firstRangeStart: 0, rangeLog: [{ at: startedAt, start: 0 }],
+    gaps: [], rate: 0, series: [],
+  });
+  let progress = [];
+  const engine = createNowPlaying({
+    liveSessions: () => sessions,
+    fetchRows: async (_a, _p, kind) => (kind === "progress" ? progress : []),
+    now: () => clock,
+  });
+  const advance = async (ms) => {
+    clock += ms;
+    engine.tick();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+  };
+  sessions.push(episode(13, clock));
+  await advance(15000);
+  // Episode 13 ends: Nuvio receives the completion (position = duration).
+  progress = [{ content_id: "tt0903747", video_id: "tt0903747:5:13", season: 5, episode: 13, position: 2_820_000, duration: 2_820_000, last_watched: clock }];
+  await advance(15000);
+  assert.equal(engine.list().find((i) => i.id === "ep13"), undefined); // finished: hidden at once
+  // Episode 14 starts automatically; it is the only tile shown.
+  sessions.push(episode(14, clock));
+  await advance(20000);
+  let items = engine.list();
+  assert.deepEqual(items.map((i) => [i.id, i.state]), [["ep14", "playing"]]);
+  // Left episode 14 at 40 % for episode 15: the player hangs up, Nuvio saves the stop.
+  progress.push({ content_id: "tt0903747", video_id: "tt0903747:5:14", season: 5, episode: 14, position: 1_000_000, duration: 2_500_000, last_watched: clock });
+  sessions[1].lastClientCloseAt = clock;
+  await advance(15000);
+  sessions.push(episode(15, clock));
+  await advance(10000);
+  items = engine.list();
+  assert.deepEqual(items.map((i) => [i.id, i.state]), [["ep15", "playing"]]);
+});
+
+test("two devices on the same profile watching two different series both stay shown", async () => {
+  let clock = 3_000_000;
+  const stream = (id, contentId, startedAt) => ({
+    id, accountId: "acc", profileId: 1, addonName: "", addonLogo: "", mode: "direct",
+    type: "series", contentId, release: "", source: "", size: 3e9, total: 3e9,
+    startedAt, lastRequestAt: startedAt, lastByteAt: startedAt, lastCloseAt: 0, lastClientCloseAt: 0,
+    requests: 1, openConns: 1, bytes: 40 * MB, firstRangeStart: 0, rangeLog: [{ at: startedAt, start: 0 }],
+    gaps: [], rate: 0, series: [],
+  });
+  const sessions = [stream("tv", "tt0903747:5:1", clock)];
+  const engine = createNowPlaying({ liveSessions: () => sessions, fetchRows: async () => [], now: () => clock });
+  const advance = async (ms) => {
+    clock += ms;
+    engine.tick();
+    await new Promise((r) => setImmediate(r));
+  };
+  await advance(60000);
+  // A second device starts another series on the same profile; the TV keeps
+  // its connection open (silent full buffer).
+  sessions.push(stream("phone", "tt3581920:1:2", clock));
+  await advance(60000);
+  assert.deepEqual(engine.list().map((i) => [i.id, i.state]).sort(), [["phone", "playing"], ["tv", "playing"]]);
 });

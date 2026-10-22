@@ -326,6 +326,17 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
     track.anchorAt = track.state === "stopped" || track.state === "completed" ? track.stoppedAt : at;
     track.fromNuvio = true;
     if (track.state === "stopped" || track.state === "completed") return;
+    // The end of the episode/film (Nuvio pushes it on completion): finished, not
+    // paused. Near the end the player already has the whole file, so the relay
+    // sees no hang-up to detect a stop from.
+    if (duration > 0 && position / duration >= COMPLETE_RATIO) {
+      track.state = "completed";
+      track.stoppedAt = at;
+      track.anchorAt = at;
+      track.confirmAt = [];
+      log?.info?.("lecture", "lecture terminée", { session: s.id, ref: `${s.accountId}:${s.profileId}` });
+      return;
+    }
     if (newRequests > 0) {
       track.state = "playing"; // seek: the player re-requested the media
       return;
@@ -399,7 +410,9 @@ export function createNowPlaying({ liveSessions, fetchRows, log, now = () => Dat
     const items = [];
     for (const s of sessions) {
       const track = ensureTrack(s);
-      const ended = track.state === "stopped" || track.state === "completed";
+      // Finished (Nuvio reported the end): gone at once. Stopped: shown a while.
+      if (track.state === "completed") continue;
+      const ended = track.state === "stopped";
       if (ended && t - track.stoppedAt > SHOW_STOPPED_MS) continue;
       // A newer playback on the same profile replaces an ended one.
       if (
