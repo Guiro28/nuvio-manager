@@ -1897,6 +1897,31 @@ const server = http.createServer(async (req, res) => {
         });
         return json(res, result);
       }
+      if (route === "/api/devices") {
+        // Devices signed in to the account (official Nuvio apps), read-only:
+        // app, platform, device name, version, first sign-in, last activity
+        // (app foreground ≤ every 15 min, or session refresh ~hourly) and the
+        // sign-in user agent. Account-wide: Nuvio does not tie a device to a profile.
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        const a = account(url.searchParams.get("accountId"));
+        let rows;
+        try {
+          rows = await rpc("list_my_sessions", {}, await token(a), a.provider);
+        } catch (error) {
+          log.warn("account", "liste des appareils indisponible", { account: a.email || a.id, error: error.message });
+          return json(res, { available: false, devices: [] });
+        }
+        const devices = (Array.isArray(rows) ? rows : []).map((row) => ({
+          app: String(row.client_name || ""),
+          version: row.client_version ? String(row.client_version) : "",
+          platform: row.platform ? String(row.platform) : "",
+          name: row.device_name ? String(row.device_name) : "",
+          userAgent: row.user_agent ? String(row.user_agent).slice(0, 512) : "",
+          firstSeen: row.created_at || null,
+          lastActive: row.last_active_at || null,
+        }));
+        return json(res, { available: true, devices });
+      }
       if (route === "/api/connections") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
         const selectedAccount = url.searchParams.get("accountId"),

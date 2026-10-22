@@ -1474,4 +1474,18 @@ export default {
   "Avant restauration du profil": "Before profile restore",
   "Dernière sauvegarde {ago}": "Last backup {ago}",
   "Une sauvegarde de sécurité est créée avant chaque restauration et l’historique de visionnage n’est jamais modifié. Chaque profil garde ses quinze dernières sauvegardes automatiques ; les sauvegardes manuelles sont conservées.": "A safety backup is created before every restore, and watch history is never modified. Each profile keeps its last fifteen automatic backups; manual backups are kept.",
+  // Appareils du compte
+  "Appareils": "Devices",
+  "Appareils du compte": "Account devices",
+  "Applications Nuvio connectées à ce compte, tous profils confondus. La dernière activité est mise à jour à l’ouverture de l’app (au plus toutes les 15 minutes) et environ toutes les heures pendant l’utilisation.": "Nuvio apps signed in to this account, all profiles together. Last activity is updated when the app is opened (at most every 15 minutes) and about every hour while it is in use.",
+  "La liste des appareils n’est pas disponible pour ce compte.": "The device list is not available for this account.",
+  "Aucun appareil connecté à ce compte.": "No device signed in to this account.",
+  "Chargement des appareils…": "Loading devices…",
+  "Application": "App",
+  "Plateforme": "Platform",
+  "Première connexion": "First sign-in",
+  "Signature": "User agent",
+  "Appareil inconnu": "Unknown device",
+  "Web": "Web",
+  "Ordinateur": "Computer",
 };

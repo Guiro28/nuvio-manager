@@ -1459,4 +1459,18 @@ export default {
   "Avant restauration du profil": "Antes de restaurar el perfil",
   "Dernière sauvegarde {ago}": "Última copia {ago}",
   "Une sauvegarde de sécurité est créée avant chaque restauration et l’historique de visionnage n’est jamais modifié. Chaque profil garde ses quinze dernières sauvegardes automatiques ; les sauvegardes manuelles sont conservées.": "Se crea una copia de seguridad antes de cada restauración y el historial de visualización nunca se modifica. Cada perfil conserva sus quince últimas copias automáticas; las copias manuales se conservan.",
+  // Appareils du compte
+  "Appareils": "Dispositivos",
+  "Appareils du compte": "Dispositivos de la cuenta",
+  "Applications Nuvio connectées à ce compte, tous profils confondus. La dernière activité est mise à jour à l’ouverture de l’app (au plus toutes les 15 minutes) et environ toutes les heures pendant l’utilisation.": "Aplicaciones Nuvio conectadas a esta cuenta, todos los perfiles juntos. La última actividad se actualiza al abrir la app (como máximo cada 15 minutos) y aproximadamente cada hora durante el uso.",
+  "La liste des appareils n’est pas disponible pour ce compte.": "La lista de dispositivos no está disponible para esta cuenta.",
+  "Aucun appareil connecté à ce compte.": "Ningún dispositivo conectado a esta cuenta.",
+  "Chargement des appareils…": "Cargando dispositivos…",
+  "Application": "Aplicación",
+  "Plateforme": "Plataforma",
+  "Première connexion": "Primera conexión",
+  "Signature": "Firma",
+  "Appareil inconnu": "Dispositivo desconocido",
+  "Web": "Web",
+  "Ordinateur": "Ordenador",
 };

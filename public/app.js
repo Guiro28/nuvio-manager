@@ -391,6 +391,9 @@ const HOME_ICONS = {
   accounts: "M13.07 10.41A5 5 0 0 0 13.07 4.59A3.39 3.39 0 0 1 15 4A3.5 3.5 0 0 1 15 11A3.39 3.39 0 0 1 13.07 10.41M5.5 7.5A3.5 3.5 0 1 1 9 11A3.5 3.5 0 0 1 5.5 7.5M7.5 7.5A1.5 1.5 0 1 0 9 6A1.5 1.5 0 0 0 7.5 7.5M16 17V19H2V17S2 13 9 13 16 17 16 17M14 17C13.86 16.22 12.67 15 9 15S4.07 16.31 4 17M15.95 13A5.32 5.32 0 0 1 18 17V19H22V17S22 13.37 15.94 13Z",
   puzzle: "M22,13.5C22,15.26 20.7,16.72 19,16.96V20A2,2 0 0,1 17,22H13.2V21.7A2.7,2.7 0 0,0 10.5,19C9,19 7.8,20.21 7.8,21.7V22H4A2,2 0 0,1 2,20V16.2H2.3C3.79,16.2 5,15 5,13.5C5,12 3.79,10.8 2.3,10.8H2V7A2,2 0 0,1 4,5H7.04C7.28,3.3 8.74,2 10.5,2C12.26,2 13.72,3.3 13.96,5H17A2,2 0 0,1 19,7V10.04C20.7,10.28 22,11.74 22,13.5M17,15H18.5A1.5,1.5 0 0,0 20,13.5A1.5,1.5 0 0,0 18.5,12H17V7H12V5.5A1.5,1.5 0 0,0 10.5,4A1.5,1.5 0 0,0 9,5.5V7H4V9.12C5.76,9.8 7,11.5 7,13.5C7,15.5 5.75,17.2 4,17.88V20H6.12C6.8,18.25 8.5,17 10.5,17C12.5,17 14.2,18.25 14.88,20H17V15Z",
   shuffle: "M17,3L22.25,7.5L17,12L22.25,16.5L17,21V18H14.26L11.44,15.18L13.56,13.06L15.5,15H17V12L17,9H15.5L6.5,18H2V15H5.26L14.26,6H17V3M2,6H6.5L9.32,8.82L7.2,10.94L5.26,9H2V6Z",
+  television: "M21,17H3V5H21M21,3H3A2,2 0 0,0 1,5V17A2,2 0 0,0 3,19H8V21H16V19H21A2,2 0 0,0 23,17V5A2,2 0 0,0 21,3Z",
+  cellphone: "M17,19H7V5H17M17,1H7C5.89,1 5,1.89 5,3V21A2,2 0 0,0 7,23H17A2,2 0 0,0 19,21V3C19,1.89 18.1,1 17,1Z",
+  monitor: "M21,16H3V4H21M21,2H3C1.89,2 1,2.89 1,4V16A2,2 0 0,0 3,18H10V20H8V22H16V20H14V18H21A2,2 0 0,0 23,16V4C23,2.89 22.1,2 21,2Z",
   database: "M12 3C7.58 3 4 4.79 4 7V17C4 19.21 7.59 21 12 21S20 19.21 20 17V7C20 4.79 16.42 3 12 3M18 17C18 17.5 15.87 19 12 19S6 17.5 6 17V14.77C7.61 15.55 9.72 16 12 16S16.39 15.55 18 14.77V17M18 12.45C16.7 13.4 14.42 14 12 14C9.58 14 7.3 13.4 6 12.45V9.64C7.47 10.47 9.61 11 12 11C14.39 11 16.53 10.47 18 9.64V12.45M12 9C8.13 9 6 7.5 6 7S8.13 5 12 5C15.87 5 18 6.5 18 7S15.87 9 12 9Z",
   trakt: "m15.082 15.107-.73-.73 9.578-9.583a4.499 4.499 0 0 0-.115-.575L13.662 14.382l1.08 1.08-.73.73-1.81-1.81L23.422 3.144c-.075-.15-.155-.3-.25-.44L11.508 14.377l2.154 2.155-.73.73-7.193-7.199.73-.73 4.309 4.31L22.546 1.86A5.618 5.618 0 0 0 18.362 0H5.635A5.637 5.637 0 0 0 0 5.634V18.37A5.632 5.632 0 0 0 5.635 24h12.732C21.477 24 24 21.48 24 18.37V6.19l-8.913 8.918zm-4.314-2.155L6.814 8.988l.73-.73 3.954 3.96zm1.075-1.084-3.954-3.96.73-.73 3.959 3.96zm9.853 5.688a4.141 4.141 0 0 1-4.14 4.14H6.438a4.144 4.144 0 0 1-4.139-4.14V6.438A4.141 4.141 0 0 1 6.44 2.3h10.387v1.04H6.438c-1.71 0-3.099 1.39-3.099 3.1V17.55c0 1.71 1.39 3.105 3.1 3.105h11.117c1.71 0 3.1-1.395 3.1-3.105v-1.754h1.04v1.754z",
   simkl: "M3.84 0A3.832 3.832 0 0 0 0 3.84v16.32A3.832 3.832 0 0 0 3.84 24h16.32A3.832 3.832 0 0 0 24 20.16V3.84A3.832 3.832 0 0 0 20.16 0zm8.567 4.11c2.074 0 3.538.061 4.393.186 1.127.168 1.94.46 2.438.877.672.578 1.009 1.613 1.009 3.104 0 .161-.004.417-.01.768h-4.234c-.014-.358-.039-.607-.074-.746-.098-.41-.42-.64-.966-.692-.484-.043-1.66-.066-3.53-.066-1.85 0-2.946.056-3.289.165-.385.133-.578.474-.578 1.024 0 .528.203.851.61.969.343.095 1.887.187 4.633.275 2.487.073 4.073.165 4.76.275.693.11 1.244.275 1.654.495.41.22.737.532.983.936.37.595.557 1.552.557 2.873 0 1.475-.182 2.557-.546 3.247-.364.683-.96 1.149-1.785 1.398-.812.25-3.05.374-6.71.374-2.226 0-3.832-.062-4.82-.187-1.204-.147-2.068-.434-2.593-.86-.567-.456-.903-1.1-1.008-1.93a10.522 10.522 0 0 1-.085-1.434v-.789H7.44c-.007.74.136 1.216.43 1.428.154.102.33.167.525.203.196.037.54.063 1.03.077a166.2 166.2 0 0 0 2.405.022c1.862-.007 2.94-.018 3.234-.033.553-.044.917-.12 1.092-.23.245-.161.368-.52.368-1.077 0-.38-.078-.648-.231-.802-.211-.212-.712-.325-1.503-.34-.547 0-1.688-.044-3.425-.132-1.794-.088-2.956-.14-3.488-.154-1.387-.044-2.364-.212-2.932-.505-.728-.373-1.205-1.01-1.429-1.91-.126-.498-.189-1.15-.189-1.956 0-1.698.309-2.895.925-3.59.462-.527 1.163-.875 2.102-1.044.848-.146 2.865-.22 6.053-.22z",
@@ -626,6 +629,42 @@ function field(item,i) { return settingControl(item,`data-field="${i}"`,settings
 function accountProvider(id = accountId) {
   return state.accounts?.find((a) => a.id === id)?.provider || "nuvio";
 }
+// Devices signed in to the account (official Nuvio apps): account-wide, Nuvio
+// does not tie a device to a profile. Read-only.
+const DEVICE_APPS = {
+  "Nuvio TV": { icon: "television", label: "TV" },
+  "Nuvio Mobile": { icon: "cellphone", label: "Mobile" },
+  "Nuvio Web": { icon: "earth", label: "Web" },
+  "Nuvio Desktop": { icon: "monitor", label: "Ordinateur" },
+};
+async function renderDevices() {
+  const host = $("#settings");
+  const paint = (data) => {
+    const devices = data.devices || [];
+    const fact = (label, value, extra = "") => (value ? `<div${extra}><dt>${esc(t(label))}</dt><dd>${value}</dd></div>` : "");
+    const when = (value) => (value ? `${esc(backupAgo(value))} <span class="muted">· ${esc(backupDate(value))}</span>` : "");
+    host.innerHTML =
+      `<div class="dev-head"><div><h3>${esc(t("Appareils du compte"))}</h3><p class="muted">${esc(t("Applications Nuvio connectées à ce compte, tous profils confondus. La dernière activité est mise à jour à l’ouverture de l’app (au plus toutes les 15 minutes) et environ toutes les heures pendant l’utilisation."))}</p></div><button id="dev-reload">${esc(t("Actualiser"))}</button></div>` +
+      (!data.available
+        ? `<p class="empty-inline">${esc(t("La liste des appareils n’est pas disponible pour ce compte."))}</p>`
+        : devices.length
+          ? `<div class="dev-list">${devices
+              .map((d) => {
+                const app = DEVICE_APPS[d.app] || { icon: "monitor", label: d.app || t("Application") };
+                const title = d.name || d.platform || d.app || t("Appareil inconnu");
+                return `<article class="panel dev-card">${mdiIcon(app.icon)}<div class="dev-main"><div class="dev-title"><strong>${esc(title)}</strong><span class="badge neutral">${esc(t(app.label))}</span></div><dl class="dev-facts">${fact("Application", esc([d.app, d.version].filter(Boolean).join(" · ")))}${fact("Plateforme", esc(d.platform))}${fact("Dernière activité", when(d.lastActive))}${fact("Première connexion", when(d.firstSeen))}${fact("Signature", `<code title="${esc(d.userAgent)}">${esc(d.userAgent)}</code>`, ' class="dev-ua"')}</dl></div></article>`;
+              })
+              .join("")}</div>`
+          : `<p class="empty-inline">${esc(t("Aucun appareil connecté à ce compte."))}</p>`);
+    $("#dev-reload").onclick = () => run(load);
+  };
+  const load = async () => {
+    const data = await api("devices?accountId=" + encodeURIComponent(accountId));
+    if (tab === "devices" && host.isConnected) paint(data);
+  };
+  host.innerHTML = `<p class="muted">${esc(t("Chargement des appareils…"))}</p>`;
+  await run(load);
+}
 function renderEditor() {
   const e = $("#editor");
   const isTuvora = accountProvider() === "tuvora";
@@ -639,6 +678,7 @@ function renderEditor() {
     ...(isTuvora ? [["iptv", "IPTV"], ["sports", "Guide des sports"]] : []),
     ["connections", "Sources de suivi"],
     ["history", t("Historique {name}", { name: isTuvora ? "Tuvora" : "Nuvio" })],
+    ["devices", "Appareils"],
   ];
   // A previously-selected Tuvora-only tab must not stick on a Nuvio profile.
   if (!isTuvora && (tab === "iptv" || tab === "sports")) tab = "identity";
@@ -652,12 +692,13 @@ function renderEditor() {
     (b) =>
       (b.onclick = () => {
         tab = b.dataset.tab;
-        if (!["history", "connections", "identity", "addons", "plugins", "iptv", "sports", "catalogs"].includes(tab))
+        if (!["history", "connections", "identity", "addons", "plugins", "iptv", "sports", "catalogs", "devices"].includes(tab))
           draft = structuredClone(current[tab]?.settings_json || {});
         renderEditor();
       }),
   );
   if (tab === "history") return renderNuvioHistory();
+  if (tab === "devices") return renderDevices();
   if (tab === "catalogs") return void run(() => renderCollections($("#settings"), {api,accountId,profileId,openDialog,run,toast,provider:accountProvider()}));
   if (tab === "iptv") return void run(() => renderIptv($("#settings"), {api,accountId,profileId,openDialog,run,toast}));
   if (tab === "sports") return void run(() => renderSports($("#settings"), {api,accountId,profileId,openDialog,run,toast}));

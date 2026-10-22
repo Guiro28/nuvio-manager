@@ -2452,3 +2452,21 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .bk-history-row {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);}
 .bk-history-row .actions {display:flex;align-items:center;gap:10px;flex:none;}
 @media(max-width:620px){.bk-parts{grid-template-columns:1fr}.bk-history-row{flex-direction:column;align-items:flex-start}}
+
+/* Comptes & profils · Appareils du compte */
+.dev-head {display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;}
+.dev-head h3 {margin:0 0 4px;}
+.dev-head p {margin:0;max-width:760px;font-size:.85rem;}
+.dev-list {display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:12px;}
+.dev-card {display:flex;gap:14px;align-items:flex-start;padding:14px 16px;margin:0;}
+.dev-card .metric-ic {flex:none;display:grid;place-items:center;width:42px;height:42px;}
+.dev-card .metric-ic svg {width:22px;height:22px;}
+.dev-main {flex:1;min-width:0;}
+.dev-title {display:flex;align-items:center;gap:8px;margin-bottom:8px;min-width:0;}
+.dev-title strong {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dev-facts {display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;margin:0;font-size:.82rem;}
+.dev-facts > div {display:contents;}
+.dev-facts dt {color:var(--text-muted);}
+.dev-facts dd {margin:0;min-width:0;overflow-wrap:anywhere;}
+.dev-ua code {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.74rem;opacity:.85;}
+@media(max-width:620px){.dev-head{flex-direction:column}}
