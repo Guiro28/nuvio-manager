@@ -24,7 +24,7 @@ Dashboard auto-hébergé pour gérer plusieurs comptes et profils [Nuvio](https:
     </td>
     <td width="50%" valign="top">
       <a href="docs/screenshots/bibliotheque-modes-proxy.png"><img src="docs/screenshots/bibliotheque-modes-proxy.png" alt="Modes de proxy par profil"></a>
-      <br><sub><b>Proxy par profil</b> — sans proxy, proxy interne ou externe (WARP), modifiables d’un coup.</sub>
+      <br><sub><b>Proxy par profil</b> — sans proxy, proxy interne ou externe, modifiables d’un coup.</sub>
     </td>
   </tr>
   <tr>
@@ -67,7 +67,7 @@ Dashboard auto-hébergé pour gérer plusieurs comptes et profils [Nuvio](https:
 
 ### Proxy d’addons intégré
 
-- Relais **direct** (interne) ou via **proxy externe** HTTP, HTTPS, SOCKS4 ou SOCKS5 (compatible Cloudflare WARP).
+- Relais **direct** (interne) ou via **proxy externe** HTTP, HTTPS, SOCKS4 ou SOCKS5 : plusieurs proxys peuvent être enregistrés dans **Paramètres > Proxy externe**, en choisissant celui qui est utilisé.
 - **URL de relais uniques par profil et révocables** : supprimer un compte ou retirer un addon coupe immédiatement le lien ; le clonage régénère des URL propres au profil cible.
 - Compteurs de bande passante (interne / externe).
 
@@ -135,23 +135,6 @@ Au premier démarrage, l’administrateur peut être créé de deux façons :
 
 Le mot de passe de l’administrateur n’est jamais stocké en clair.
 
-## Variante avec WARP
-
-Pour lancer Nuvio Manager avec un conteneur Cloudflare WARP :
-
-```sh
-docker compose -f compose.warp.yaml pull
-docker compose -f compose.warp.yaml up -d
-```
-
-Dans **Paramètres > Proxy externe**, utiliser :
-
-```text
-socks5://warp:1080
-```
-
-Le dashboard accepte également les proxys HTTP, HTTPS, SOCKS4 et SOCKS5 hébergés localement ou à distance.
-
 ## Reverse proxy
 
 Pour utiliser un domaine HTTPS, placer Caddy, Nginx ou Traefik devant le port `3100`, puis enregistrer le domaine dans **Paramètres > Adresse publique**.
@@ -190,14 +173,6 @@ Configuration détaillée (Traefik ForwardAuth + oauth2-proxy, cookies, dépanna
 git pull
 docker compose pull
 docker compose up -d
-```
-
-Avec WARP :
-
-```sh
-git pull
-docker compose -f compose.warp.yaml pull
-docker compose -f compose.warp.yaml up -d
 ```
 
 ## Développement local

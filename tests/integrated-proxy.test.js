@@ -128,15 +128,18 @@ test("integrated proxy serves direct and WARP addon routes from the dashboard", 
   assert.equal(state.proxyAddons.length, 1);
   assert.ok(saves >= 2);
 
-  for (const mode of ["direct", "warp"]) {
-    const manifestResponse = await fetch(`${dashboardOrigin}/relay/${mode}/${addon.id}/manifest.json`);
+  // Public segments (interne / externe) and the legacy ones of links minted
+  // before 0.3.14 (direct / warp); the manifest id keeps the internal mode so an
+  // installed addon's identity never changes. Stream links use the new segments.
+  for (const [mode, segment] of [["direct", "interne"], ["warp", "externe"], ["direct", "direct"], ["warp", "warp"]]) {
+    const manifestResponse = await fetch(`${dashboardOrigin}/relay/${segment}/${addon.id}/manifest.json`);
     assert.equal(manifestResponse.status, 200);
     assert.equal((await manifestResponse.json()).id, `org.test.addon.wproxy.${mode}`);
 
-    const streamResponse = await fetch(`${dashboardOrigin}/relay/${mode}/${addon.id}/stream/movie/tt1.json`);
+    const streamResponse = await fetch(`${dashboardOrigin}/relay/${segment}/${addon.id}/stream/movie/tt1.json`);
     assert.equal(streamResponse.status, 200);
     const streams = (await streamResponse.json()).streams;
-    assert.match(streams[0].url, new RegExp(`^${dashboardOrigin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/relay/${mode}/play\\?t=`));
+    assert.match(streams[0].url, new RegExp(`^${dashboardOrigin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/relay/${mode === "direct" ? "interne" : "externe"}/play\\?t=`));
     assert.equal(streams[0].behaviorHints?.proxyHeaders, undefined);
     assert.equal(streams[1].infoHash, "0123456789abcdef");
 

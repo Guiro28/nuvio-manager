@@ -13,6 +13,10 @@ const { request, readAll } = require("../vendor/proxy/src/http.js");
 const { decodeToken, fetchManifest, fetchResource } = require("../vendor/proxy/src/addon.js");
 
 const MODES = new Set(["direct", "warp"]);
+// Public path segment of each mode in relay URLs. Links minted before 0.3.14
+// carry the internal names (/relay/direct, /relay/warp) and keep working.
+export const RELAY_SEGMENT = { direct: "interne", warp: "externe" };
+const SEGMENT_MODE = { interne: "direct", externe: "warp", direct: "direct", warp: "warp" };
 const PROXY_PROTOCOLS = new Set(["http:", "https:", "socks:", "socks4:", "socks4a:", "socks5:", "socks5h:"]);
 
 export function normalizeProxyUrl(value) {
@@ -329,10 +333,10 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     null;
 
   // Extract {mode, token} from one of our own relay URLs (any host).
-  const RELAY_RE = /\/relay\/(direct|warp)\/([a-f0-9]{10}|[a-f0-9]{32})\/manifest\.json(?:$|\?)/i;
+  const RELAY_RE = /\/relay\/(interne|externe|direct|warp)\/([a-f0-9]{10}|[a-f0-9]{32})\/manifest\.json(?:$|\?)/i;
   const relayRef = (url) => {
     const m = RELAY_RE.exec(String(url || ""));
-    return m ? { mode: m[1], token: m[2] } : null;
+    return m ? { mode: SEGMENT_MODE[m[1].toLowerCase()], token: m[2] } : null;
   };
   // For cloning: resolve a relay URL back to its upstream so the target can be
   // given a fresh, target-owned grant. Returns null for non-relay URLs.
@@ -531,7 +535,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
 
   async function handle(req, res, url) {
     const match = url.pathname.match(
-      /^\/relay\/(direct|warp)\/(play|([a-f0-9]{10}|[a-f0-9]{32})\/(.+))$/,
+      /^\/relay\/(interne|externe|direct|warp)\/(play|([a-f0-9]{10}|[a-f0-9]{32})\/(.+))$/,
     );
     if (!match) return false;
 
@@ -547,7 +551,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
       return true;
     }
 
-    const mode = match[1];
+    const mode = SEGMENT_MODE[match[1]];
     try {
       const upstream = upstreamFor(mode, configuredProxy());
       if (match[2] === "play") {
@@ -673,7 +677,7 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
         addon,
         restPath,
         url.search,
-        `${configuredOrigin()}/relay/${mode}`,
+        `${configuredOrigin()}/relay/${RELAY_SEGMENT[mode]}`,
         upstream,
         streamId
           ? { content: `${streamType}/${streamId}`, onToken: (token, stream) => rememberStream(token, stream, streamType, streamId) }

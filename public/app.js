@@ -1493,7 +1493,7 @@ async function assign(id) {
   if (!accountId) return toast(t("Connecte d’abord un compte Nuvio."));
   await loadProfiles();
   openDialog(
-    `<h2>${esc(t("Attribuer l’addon"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="assign-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="assign-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="assign-mode"><option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · WARP, SOCKS ou HTTP"))}</option></select></label></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="assign-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
+    `<h2>${esc(t("Attribuer l’addon"))}</h2><div class="form"><label>${esc(t("Compte"))}<select id="assign-account">${accountOptions()}</select></label><label>${esc(t("Profil"))}<select id="assign-profile">${profileOptions()}</select></label><label>${esc(t("Mode de connexion"))}<select id="assign-mode"><option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · SOCKS ou HTTP"))}</option></select></label></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="assign-preview" class="primary">${esc(t("Prévisualiser l’attribution"))}</button></div>`,
   );
   $("#assign-account").onchange = (e) =>
     run(async () => {
@@ -1551,7 +1551,7 @@ function enableListReorder(listEl) {
 async function bulkAssign() {
   if (!accountId) return toast(t("Connecte d’abord un compte Nuvio."));
   await loadProfiles();
-  const modeOptions = `<option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · WARP, SOCKS ou HTTP"))}</option>`;
+  const modeOptions = `<option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · SOCKS ou HTTP"))}</option>`;
   const checklist = state.library
     .map(
       (a) =>
@@ -1598,7 +1598,7 @@ async function assignToProfiles(id) {
       profiles: await api("profiles?accountId=" + encodeURIComponent(a.id)).catch(() => []),
     })),
   );
-  const modeOptions = `<option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · WARP, SOCKS ou HTTP"))}</option>`;
+  const modeOptions = `<option value="none">${esc(t("Sans proxy · URL d’origine"))}</option><option value="direct">${esc(t("Proxy · IP du serveur"))}</option><option value="warp">${esc(t("Proxy externe · SOCKS ou HTTP"))}</option>`;
   const groups = perAccount
     .map(
       ({ account, profiles }) =>
@@ -1735,7 +1735,7 @@ async function renderProxy() {
       t("nav.proxy"),
       t("Le moteur stremio-addon-proxy est intégré au dashboard, avec une sortie choisie pour chaque addon."),
     ) +
-    `<div id="proxy-status" class="status-grid"><p class="muted">${esc(t("Vérification des sorties réseau…"))}</p></div><div class="hint">${esc(t("Sans proxy : le profil utilise l’URL originale. Proxy direct : les flux HTTP/HTTPS passent par l’IP du serveur. Proxy externe : ils passent par l’adresse HTTP(S) ou SOCKS définie dans Paramètres. Les flux torrent ne sont pas proxifiés."))}</div><p class="footer-note">${esc(t("Le proxy direct est toujours disponible. La sortie externe peut être un conteneur WARP ou tout autre proxy accessible depuis le serveur."))}</p>`;
+    `<div id="proxy-status" class="status-grid"><p class="muted">${esc(t("Vérification des sorties réseau…"))}</p></div><div class="hint">${esc(t("Sans proxy : le profil utilise l’URL originale. Proxy direct : les flux HTTP/HTTPS passent par l’IP du serveur. Proxy externe : ils passent par l’adresse HTTP(S) ou SOCKS définie dans Paramètres. Les flux torrent ne sont pas proxifiés."))}</div><p class="footer-note">${esc(t("Le proxy direct est toujours disponible. La sortie externe est le proxy choisi dans Paramètres, parmi ceux enregistrés."))}</p>`;
   const rows = await api("proxy/status");
   $("#proxy-status").innerHTML = rows
     .map(

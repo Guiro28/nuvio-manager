@@ -8,8 +8,7 @@ import { createNowPlaying } from "./now-playing.js";
 import { RESTORE_PARTS, expiredBackups, profileSlice, profilesInSnapshot } from "./backups.js";
 import { getXperienceAvatars } from "./xperience.js";
 import { readManifestInfo, readManifestLogo } from "./manifest.js";
-import { createIntegratedProxy, normalizeProxyUrl, proxySummary, normalizeManifestUrl } from "./integrated-proxy.js";
-import { createProxyDiagnostics } from "./proxy-diagnostics.js";
+import { createIntegratedProxy, normalizeProxyUrl, proxySummary, normalizeManifestUrl, RELAY_SEGMENT } from "./integrated-proxy.js";
 import {
   startTrakt,
   pollTrakt,
@@ -283,9 +282,6 @@ const saveSessions = () =>
     version: 1,
     entries: Object.fromEntries(sessions),
   });
-const proxyDiagnostics = createProxyDiagnostics({
-  getProxyUrl: effectiveProxyUrl,
-});
 const issueSession = (res, req, role = "admin", account = null) => {
   const sid = crypto.randomBytes(32).toString("hex");
   sessions.set(sid, { exp: Date.now() + 8 * 3600 * 1000, role, account });
@@ -362,6 +358,27 @@ const requestLang = (req) => {
 };
 const trackerConfig = (service) => panel.trackerApps?.[service] || {};
 const savePanel = () => db.write("panel-settings", panel);
+// External proxies saved in the settings (encrypted with them). The one in use
+// is panel.proxyUrl: every addon in "Proxy externe" mode goes through it.
+if (!Array.isArray(panel.proxies)) panel.proxies = [];
+if (panel.proxyUrl && !panel.proxies.some((entry) => entry.url === panel.proxyUrl)) {
+  panel.proxies.unshift({ id: crypto.randomUUID(), url: panel.proxyUrl });
+  savePanel();
+}
+const proxyList = () =>
+  panel.proxies.map((entry) => {
+    const active = Boolean(panel.proxyUrl) && entry.url === panel.proxyUrl;
+    try {
+      return { id: entry.id, ...proxySummary(entry.url), credentials: Boolean(new URL(entry.url).username), active, valid: true };
+    } catch (error) {
+      return { id: entry.id, display: "Configuration invalide", type: "", credentials: false, active, valid: false, error: error.message };
+    }
+  });
+const savedProxy = (id) => {
+  const entry = panel.proxies.find((x) => x.id === id);
+  assert(entry, "Proxy introuvable", 404);
+  return entry;
+};
 
 // Bootstrap configuration from environment variables (compose-friendly). When
 // set, these win over stored values and let the manager come up fully configured
@@ -913,7 +930,7 @@ async function installation(item, mode, ctx) {
   if (mode === "none") return item.url;
   assert(["direct", "warp"].includes(mode), "Mode proxy invalide");
   const addon = await addonProxy.register(item, mode, ctx);
-  return `${publicOrigin()}/relay/${mode}/${addon.id}/manifest.json`;
+  return `${publicOrigin()}/relay/${RELAY_SEGMENT[mode]}/${addon.id}/manifest.json`;
 }
 // Clone helper: give the target profile its own relay grants. Each proxied addon
 // copied from the source is re-minted so the target gets a unique, revocable URL
@@ -1286,7 +1303,7 @@ const server = http.createServer(async (req, res) => {
       const isAdmin = isLocalAdmin || (viewer.role === "nuvio" && adminAccountIds.includes(viewer.account));
       const ADMIN_ONLY = new Set([
         "/api/settings", "/api/settings/tmdb", "/api/settings/proxy", "/api/settings/public-url",
-        "/api/settings/proxy/test", "/api/settings/proxy/detect", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
+        "/api/settings/proxy/test", "/api/settings/proxy/select", "/api/settings/proxy/remove", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
         "/api/settings/history", "/api/history/status", "/api/history/sync",
         "/api/settings/login",
         "/api/overview", "/api/metrics/history",
@@ -1328,6 +1345,7 @@ const server = http.createServer(async (req, res) => {
           publicUrl: publicOrigin(),
           tmdbConfigured: Boolean(panel.tmdbKey),
           externalProxy,
+          proxies: proxyList(),
           isLocalAdmin,
           adminManaged: adminFromEnv,
           loginDisabled: loginDisabled(),
@@ -1399,11 +1417,34 @@ const server = http.createServer(async (req, res) => {
         return json(res, {ok:true});
       }
       if (route === "/api/settings/proxy") {
+        // Adds a proxy to the saved list; the first one is used right away.
         assert(req.method === "POST", "Méthode non autorisée", 405);
-        assert(typeof b.url === "string", "URL du proxy requise");
-        panel.proxyUrl = normalizeProxyUrl(b.url);
+        const address = normalizeProxyUrl(typeof b.url === "string" ? b.url : "");
+        assert(address, "URL du proxy requise");
+        let entry = panel.proxies.find((x) => x.url === address);
+        if (!entry) panel.proxies.push((entry = { id: crypto.randomUUID(), url: address }));
+        if (!panel.proxyUrl) panel.proxyUrl = address;
         savePanel();
-        return json(res, { ok: true, ...proxySummary(panel.proxyUrl) });
+        log.info("settings", "proxy externe ajouté", { proxy: proxySummary(address).display, active: panel.proxyUrl === address });
+        return json(res, { ok: true, id: entry.id, active: panel.proxyUrl === address, ...proxySummary(address) });
+      }
+      if (route === "/api/settings/proxy/select") {
+        // Proxy used by the "Proxy externe" addons; no id = none.
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        panel.proxyUrl = b.id ? savedProxy(b.id).url : "";
+        savePanel();
+        log.info("settings", "proxy externe utilisé", { proxy: panel.proxyUrl ? proxySummary(panel.proxyUrl).display : "aucun" });
+        return json(res, { ok: true, proxies: proxyList() });
+      }
+      if (route === "/api/settings/proxy/remove") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const entry = savedProxy(b.id);
+        const wasActive = entry.url === panel.proxyUrl;
+        panel.proxies = panel.proxies.filter((x) => x !== entry);
+        if (wasActive) panel.proxyUrl = "";
+        savePanel();
+        log.info("settings", "proxy externe supprimé", { proxy: proxySummary(entry.url).display, wasActive });
+        return json(res, { ok: true, wasActive, proxies: proxyList() });
       }
       if (route === "/api/settings/public-url") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
@@ -1412,21 +1453,17 @@ const server = http.createServer(async (req, res) => {
         savePanel();
         return json(res, { ok: true, url: panel.publicUrl });
       }
-      if (route === "/api/settings/proxy/detect") {
-        assert(req.method === "GET", "Méthode non autorisée", 405);
-        return json(res, await proxyDiagnostics.detect());
-      }
       if (route === "/api/settings/proxy/test") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
-        const candidate = typeof b.url === "string" && b.url.trim()
-          ? normalizeProxyUrl(b.url)
-          : effectiveProxyUrl();
+        const candidate = b.id
+          ? savedProxy(b.id).url
+          : typeof b.url === "string" && b.url.trim()
+            ? normalizeProxyUrl(b.url)
+            : effectiveProxyUrl();
         assert(candidate, "Aucun proxy externe n’est configuré");
         const result = await addonProxy.test("warp", candidate);
-        const trace = result.ok ? await proxyDiagnostics.probe(candidate) : null;
-        return json(res, result.ok
-          ? { ...result, warp: trace?.warp || "unknown" }
-          : { ok: false, mode: "warp", error: "Proxy inaccessible depuis le manager." });
+        // Transport errors are not echoed: they can contain proxy credentials.
+        return json(res, result.ok ? result : { ok: false, mode: "warp", error: "Proxy inaccessible depuis le manager." });
       }
       if (route === "/api/settings/admins") {
         assert(req.method === "POST", "Méthode non autorisée", 405);

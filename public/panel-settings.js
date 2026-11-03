@@ -7,7 +7,7 @@ const esc = (value) => String(value ?? "").replace(
 
 export async function renderPanelSettings(container, { api, run, toast, onSaved }) {
   const config = await api("settings");
-  const proxy = config.externalProxy || {};
+  const proxies = config.proxies || [];
   const history = config.history || { enabled: true, intervalMinutes: 30, lastFullSync: 0 };
   const lastSyncLabel = (ms) =>
     ms ? t("Dernière synchronisation : {date}", { date: new Date(ms).toLocaleString() }) : t("Jamais synchronisé.");
@@ -35,19 +35,31 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
 
     <section class="panel">
       <h2>${esc(t("Proxy externe"))}</h2>
-      <p class="muted">${esc(t("Configure une sortie WARP ou tout autre proxy HTTP(S) ou SOCKS accessible depuis le serveur. Cette adresse est utilisée par les addons attribués au mode « Proxy externe »."))}</p>
-      <p>${proxy.configured ? `${esc(t("✓ Proxy {type} configuré :", { type: proxy.type }))} <code>${esc(proxy.display)}</code>${proxy.source === "environment" ? ` · ${esc(t("variable d’environnement"))}` : ""}` : esc(t("Aucun proxy externe configuré."))}</p>
-      ${proxy.valid === false ? `<p class="error">${esc(proxy.error)}</p>` : ""}
-      <div class="proxy-diagnostics">
-        <div class="actions"><button type="button" id="detect-warp">${esc(t("Détecter WARP"))}</button></div>
-        <p id="warp-detection-result" class="muted" role="status" aria-live="polite">${esc(t("Détection de WARP…"))}</p>
-        <div id="warp-candidates"></div>
+      <p class="muted">${esc(t("Enregistre un ou plusieurs proxys HTTP(S) ou SOCKS accessibles depuis le serveur, puis choisis celui qu’utilisent les addons attribués au mode « Proxy externe »."))}</p>
+      <div class="proxy-list">
+        ${proxies.length ? proxies.map((proxy) => `
+        <div class="proxy-entry${proxy.active ? " is-active" : ""}">
+          <div class="proxy-entry-copy">
+            <div><code>${esc(proxy.display)}</code> ${proxy.type ? `<span class="badge neutral">${esc(proxy.type)}</span>` : ""}${proxy.credentials ? ` <span class="badge neutral">${esc(t("avec identifiants"))}</span>` : ""}${proxy.active ? ` <span class="badge">${esc(t("Utilisé"))}</span>` : ""}</div>
+            ${proxy.valid ? "" : `<p class="error">${esc(proxy.error)}</p>`}
+            <p class="muted" data-proxy-result="${esc(proxy.id)}"></p>
+          </div>
+          <div class="actions">
+            ${proxy.active
+              ? `<button type="button" data-proxy-select="">${esc(t("Ne plus utiliser"))}</button>`
+              : `<button type="button" class="primary" data-proxy-select="${esc(proxy.id)}" ${proxy.valid ? "" : "disabled"}>${esc(t("Utiliser"))}</button>`}
+            <button type="button" data-proxy-test="${esc(proxy.id)}" ${proxy.valid ? "" : "disabled"}>${esc(t("Tester"))}</button>
+            <button type="button" class="quiet" data-proxy-remove="${esc(proxy.id)}">${esc(t("Supprimer"))}</button>
+          </div>
+        </div>`).join("") : `<p class="muted">${esc(t("Aucun proxy enregistré."))}</p>`}
       </div>
+      ${proxies.length && !proxies.some((proxy) => proxy.active) ? `<p class="error">${esc(t("Aucun proxy n’est utilisé : les addons en mode « Proxy externe » ne fonctionnent pas tant qu’un proxy n’est pas choisi."))}</p>` : ""}
       <form id="proxy-form" class="form">
+        <h3>${esc(t("Ajouter un proxy"))}</h3>
         <label>${esc(t("URL du proxy"))}<input name="externalProxyUrl" type="text" inputmode="url" autocomplete="off" data-form-type="other" spellcheck="false" maxlength="4096" placeholder="socks5://utilisateur:mot-de-passe@serveur:1080" required></label>
         <p class="muted">${esc(t("Protocoles acceptés : HTTP, HTTPS, SOCKS, SOCKS4 et SOCKS5. Les identifiants peuvent être inclus dans l’URL et restent chiffrés sur le serveur."))}</p>
-        <p class="muted">${esc(t("Docker : socks5://warp:1080 (réseau partagé). WARP local : socks5://127.0.0.1:40000. Dans Docker, 127.0.0.1 désigne le conteneur du manager, pas l’hôte."))}</p>
-        <div class="actions"><button class="primary">${esc(t("Enregistrer le proxy"))}</button><button type="button" id="test-proxy">${esc(t("Tester cette adresse"))}</button>${proxy.configured ? `<button type="button" id="remove-proxy">${esc(t("Désactiver"))}</button>` : ""}</div>
+        <p class="muted">${esc(t("Dans Docker, 127.0.0.1 désigne le conteneur du manager, pas l’hôte : utilise le nom du service ou l’adresse de la machine."))}</p>
+        <div class="actions"><button class="primary">${esc(t("Ajouter le proxy"))}</button><button type="button" id="test-proxy">${esc(t("Tester cette adresse"))}</button></div>
         <p id="proxy-test-result" class="muted"></p>
       </form>
     </section>
@@ -149,65 +161,49 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
   };
 
   const proxyInput = $("#proxy-form [name=externalProxyUrl]");
-  const warpLabel = (status) => status === "on" ? t("WARP actif")
-    : status === "plus" ? t("WARP+ actif")
-    : status === "off" ? t("WARP désactivé") : t("État WARP inconnu");
-  const detectWarp = async () => {
-    const button = $("#detect-warp"), output = $("#warp-detection-result");
-    button.disabled = true;
-    output.textContent = t("Détection de WARP…");
-    try {
-      const diagnostic = await api("settings/proxy/detect");
-      output.textContent = diagnostic.suggestedUrl
-        ? t("WARP détecté · adresse à utiliser : {url}", { url: diagnostic.suggestedUrl })
-        : t("Aucune sortie WARP active détectée depuis le manager.");
-      $("#warp-candidates").innerHTML = diagnostic.results.map((result, index) => `
-        <div class="proxy-candidate">
-          <div><code>${esc(result.display)}</code><p class="muted">${esc(result.available
-            ? `${t("Proxy accessible")} · ${warpLabel(result.warp)} · ${t("IP de sortie : {ip}", { ip: result.ip })}`
-            : t("Adresse inaccessible depuis le manager."))}</p></div>
-          ${result.available && result.usableUrl ? `<div class="actions"><button type="button" data-use-proxy="${index}">${esc(t("Utiliser cette adresse"))}</button><button type="button" data-copy-proxy="${index}">${esc(t("Copier"))}</button></div>` : ""}
-        </div>`).join("");
-      $("#warp-candidates").querySelectorAll("[data-use-proxy]").forEach(button => {
-        button.onclick = () => {
-          proxyInput.value = diagnostic.results[Number(button.dataset.useProxy)].usableUrl;
-          proxyInput.focus();
-          $("#proxy-test-result").textContent = t("Adresse renseignée : testez-la puis enregistrez-la.");
-        };
-      });
-      $("#warp-candidates").querySelectorAll("[data-copy-proxy]").forEach(button => {
-        button.onclick = () => run(async () => {
-          await navigator.clipboard.writeText(diagnostic.results[Number(button.dataset.copyProxy)].usableUrl);
-          toast(t("Adresse copiée."));
-        });
-      });
-    } catch {
-      output.textContent = t("Détection impossible. Réessayez ou testez une adresse manuellement.");
-    } finally { button.disabled = false; }
-  };
-  $("#detect-warp").onclick = detectWarp;
-  void detectWarp();
+  const testResult = (result) => result.ok
+    ? t("Connexion réussie · IP de sortie : {ip}", { ip: result.ip })
+    : t("Échec : {error}", { error: result.error });
   $("#proxy-form").onsubmit = (event) => {
     event.preventDefault();
     run(async () => {
-      await api("settings/proxy", { url: proxyInput.value });
-      toast(t("Proxy externe enregistré."));
+      const result = await api("settings/proxy", { url: proxyInput.value });
+      toast(result.active ? t("Proxy ajouté et utilisé.") : t("Proxy ajouté à la liste."));
       await onSaved();
     });
   };
   $("#test-proxy").onclick = () => run(async () => {
     $("#proxy-test-result").textContent = t("Test en cours…");
-    const result = await api("settings/proxy/test", { url: proxyInput.value.trim() });
-    $("#proxy-test-result").textContent = result.ok
-      ? `${t("Connexion réussie · IP de sortie : {ip}", { ip: result.ip })} · ${warpLabel(result.warp)}`
-      : t("Échec : {error}", { error: result.error });
+    $("#proxy-test-result").textContent = testResult(await api("settings/proxy/test", { url: proxyInput.value.trim() }));
   });
-  if ($("#remove-proxy"))
-    $("#remove-proxy").onclick = () => run(async () => {
-      await api("settings/proxy", { url: "" });
-      toast(t("Proxy externe désactivé."));
+  container.querySelectorAll("[data-proxy-select]").forEach((button) => {
+    button.onclick = () => run(async () => {
+      await api("settings/proxy/select", { id: button.dataset.proxySelect || null });
+      toast(button.dataset.proxySelect ? t("Proxy externe changé.") : t("Plus aucun proxy externe utilisé."));
       await onSaved();
     });
+  });
+  container.querySelectorAll("[data-proxy-test]").forEach((button) => {
+    button.onclick = () => run(async () => {
+      const output = container.querySelector(`[data-proxy-result="${CSS.escape(button.dataset.proxyTest)}"]`);
+      output.textContent = t("Test en cours…");
+      output.textContent = testResult(await api("settings/proxy/test", { id: button.dataset.proxyTest }));
+    });
+  });
+  container.querySelectorAll("[data-proxy-remove]").forEach((button) => {
+    button.onclick = () => {
+      const proxy = proxies.find((entry) => entry.id === button.dataset.proxyRemove);
+      const message = proxy?.active
+        ? t("Supprimer {proxy} ? C’est le proxy utilisé : les addons en mode « Proxy externe » n’auront plus de sortie tant qu’un autre proxy n’est pas choisi.", { proxy: proxy.display })
+        : t("Supprimer {proxy} de la liste ?", { proxy: proxy?.display || "" });
+      if (!confirm(message)) return;
+      run(async () => {
+        await api("settings/proxy/remove", { id: button.dataset.proxyRemove });
+        toast(t("Proxy supprimé."));
+        await onSaved();
+      });
+    };
+  });
 
   $("#trackers-form").onsubmit = (event) => {
     event.preventDefault();

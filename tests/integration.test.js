@@ -396,6 +396,23 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.equal(JSON.stringify(panelSettings.data).includes('trakt-secret'),false);
   assert.equal(JSON.stringify(panelSettings.data).includes('tmdb-test-secret'),false);
   assert.equal(JSON.stringify(panelSettings.data).includes('proxy-secret'),false);
+  // Saved proxy list: the first one is used, others are added without switching.
+  assert.equal(panelSettings.data.proxies.length,1);
+  assert.equal(panelSettings.data.proxies[0].active,true);
+  assert.equal(panelSettings.data.proxies[0].credentials,true);
+  const second=await call('settings/proxy',{url:'http://second-proxy.example:8080'});
+  assert.equal(second.status,200);
+  assert.equal(second.data.active,false);
+  assert.equal((await call('settings/proxy',{url:'http://second-proxy.example:8080'})).data.id,second.data.id); // no duplicate
+  assert.equal((await call('settings/proxy',{url:''})).status,400);
+  assert.equal((await call('settings/proxy/select',{id:'unknown'})).status,404);
+  let proxies=(await call('settings/proxy/select',{id:second.data.id})).data.proxies;
+  assert.deepEqual(proxies.map(p=>[p.display,p.active]),[['socks5://proxy.example:1080',false],['http://second-proxy.example:8080',true]]);
+  proxies=(await call('settings/proxy/remove',{id:second.data.id})).data.proxies;
+  assert.deepEqual(proxies.map(p=>p.active),[false]); // removing the proxy in use leaves none in use
+  assert.equal((await call('settings')).data.externalProxy.configured,false);
+  proxies=(await call('settings/proxy/select',{id:proxies[0].id})).data.proxies;
+  assert.equal(proxies[0].active,true);
   assert.equal((await call('settings/public-url',{url:'ftp://manager.invalid'})).status,400);
   assert.equal((await call('settings/public-url',{url:base})).status,200);
   assert.equal((await call('settings/admin',{username:'owner',currentPassword:'wrong',newPassword:'new-test-password'})).status,403);
