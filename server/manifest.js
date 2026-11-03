@@ -39,7 +39,7 @@ async function assertPublicHost(url, lookupImpl) {
   assert(literal.length && literal.every(({ address }) => !privateIp(address)), "Adresse réseau privée refusée");
 }
 
-export async function readManifestLogo(manifestUrl, { fetchImpl = fetch, lookupImpl = lookup } = {}) {
+async function fetchManifest(manifestUrl, { fetchImpl = fetch, lookupImpl = lookup } = {}) {
   const manifest = remoteUrl(manifestUrl);
   assert(manifest, "URL de manifeste invalide");
   await assertPublicHost(manifest, lookupImpl);
@@ -55,8 +55,42 @@ export async function readManifestLogo(manifestUrl, { fetchImpl = fetch, lookupI
   assert(Buffer.byteLength(text) <= 1024 * 1024, "Manifest trop volumineux", 502);
   let payload;
   try { payload = JSON.parse(text); } catch { throw new Error("Manifest JSON invalide"); }
+  return { manifest, payload };
+}
+
+export async function readManifestLogo(manifestUrl, options = {}) {
+  const { lookupImpl = lookup } = options;
+  const { manifest, payload } = await fetchManifest(manifestUrl, options);
   const logo = remoteUrl(payload?.logo || payload?.icon, manifest);
   if (!logo) return null;
   await assertPublicHost(logo, lookupImpl);
   return logo.href;
 }
+
+// Logo + Stremio configuration hints in one read. `configurable` mirrors
+// Stremio's "Configure" button: the addon serves a page at …/configure next to
+// its manifest (configuration in the URL path is kept, so the page opens on the
+// current settings).
+export async function readManifestInfo(manifestUrl, options = {}) {
+  const { lookupImpl = lookup } = options;
+  const { manifest, payload } = await fetchManifest(manifestUrl, options);
+  const hints = payload?.behaviorHints || {};
+  let logo = null;
+  const raw = payload?.logo || payload?.icon;
+  if (raw) {
+    const url = remoteUrl(raw, manifest);
+    if (url) {
+      await assertPublicHost(url, lookupImpl);
+      logo = url.href;
+    }
+  }
+  return {
+    id: typeof payload?.id === "string" ? payload.id : null,
+    logo,
+    configurable: Boolean(hints.configurable || hints.configurationRequired),
+    configurationRequired: Boolean(hints.configurationRequired),
+  };
+}
+
+// The configuration page of an addon, as Stremio builds it.
+export const configureUrl = (manifestUrl) => String(manifestUrl).replace(/\/manifest\.json(?=$|\?)/i, "/configure");

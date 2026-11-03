@@ -2470,3 +2470,10 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .dev-facts dd {margin:0;min-width:0;overflow-wrap:anywhere;}
 .dev-ua code {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.74rem;opacity:.85;}
 @media(max-width:620px){.dev-head{flex-direction:column}}
+
+/* Bibliothèque : bouton « Configurer » de l'addon (engrenage, comme Stremio) */
+.lib-configure {display:inline-grid;place-items:center;width:40px;height:40px;padding:0;border-radius:50%;flex:none;}
+.lib-configure svg {width:20px;height:20px;fill:currentColor;transition:transform .3s;}
+.lib-configure:hover svg {transform:rotate(45deg);}
+
+.cfg-steps {margin:8px 0 12px;padding-left:20px;display:grid;gap:4px;}

@@ -1277,6 +1277,11 @@ function addonLogoHtml(addon, extraClass = "") {
   } catch {}
   return `<span class="addon-logo${extraClass ? " " + extraClass : ""}"><span>${esc((addon.name || "A").slice(0, 1).toUpperCase())}</span>${source ? `<img src="${esc(source)}" alt="${esc(t("Logo de {name}", { name: addon.name }))}" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>`;
 }
+// Gear icon (Material Design Icons "cog"), as on Stremio's configure button.
+const COG_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg>`;
+// An addon's configuration page, as Stremio opens it ("Configure"): next to the
+// manifest, keeping the configuration already in the URL path.
+const configurePage = (manifestUrl) => String(manifestUrl).replace(/\/manifest\.json(?=$|\?)/i, "/configure");
 async function renderLibrary() {
   const addonLogo = (addon) => addonLogoHtml(addon);
   // The avatars + profile count open a window to manage each profile's proxy mode
@@ -1288,7 +1293,7 @@ async function renderLibrary() {
       ? `<button type="button" class="lib-usage" data-usage="${esc(a.id)}" title="${esc(t("Gérer les profils"))}">${stack(users)}<span class="badge neutral lib-count">${esc(t("{n} profils", { n: users.length }))}</span></button>`
       : `<span class="badge neutral lib-count lib-count-empty">${esc(t("Aucun profil"))}</span>`;
   const card = (a, users) =>
-    `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="lib-row-right">${usageControl(a, users)}<div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-assign-many="${a.id}">${esc(t("À plusieurs profils"))}</button><button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></div></article>`;
+    `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="lib-row-right">${usageControl(a, users)}<div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-assign-many="${a.id}">${esc(t("À plusieurs profils"))}</button>${a.configurable ? `<button class="lib-configure" data-configure="${a.id}" title="${esc(t("Ouvrir la page de configuration de l’addon"))}" aria-label="${esc(t("Configurer"))}">${COG_ICON}</button>` : ""}<button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></div></article>`;
 
   $("#content").innerHTML =
     heading(
@@ -1302,7 +1307,11 @@ async function renderLibrary() {
   $("#new-addon").onclick = () => addonForm();
   if ($("#bulk-assign")) $("#bulk-assign").onclick = () => run(() => bulkAssign());
 
-  if (state.library.some((item) => !Object.hasOwn(item, "logo")))
+  const unchecked = (item) =>
+    !Object.hasOwn(item, "logo") ||
+    !Object.hasOwn(item, "configurable") ||
+    (item.configurable === null && Date.now() - (Date.parse(item.logo_checked_at) || 0) > 864e5);
+  if (state.library.some(unchecked))
     api("library/refresh-logos", {}).then((result) => {
       state.library = result.library;
       if (page === "library") renderLibrary();
@@ -1331,6 +1340,9 @@ async function renderLibrary() {
       (b.onclick = () =>
         addonForm(state.library.find((a) => a.id === b.dataset.edit))),
   );
+  $$("[data-configure]").forEach((b) => {
+    b.onclick = () => configureDialog(state.library.find((a) => a.id === b.dataset.configure), usage[b.dataset.configure] || []);
+  });
   $$("[data-assign]").forEach(
     (b) => (b.onclick = () => run(() => assign(b.dataset.assign))),
   );
@@ -1367,6 +1379,42 @@ function removeLibraryAddon(addon, users) {
       button.disabled = false;
       $("#lib-remove-error").innerHTML = `<p class="error">${esc(error.message)}</p>`;
       if (page === "library") renderLibrary(); // usage may have changed (partial removal)
+    } finally {
+      document.body.classList.remove("busy");
+    }
+  };
+}
+// Stremio-like "Configure": the addon's page opens in a new tab; once it is
+// reconfigured, its new manifest URL is pasted here. Profiles using the addon
+// without proxy get the new URL; proxied ones keep their relay link, which the
+// manager points at the new configuration.
+function configureDialog(addon, users) {
+  if (!addon) return;
+  const direct = users.filter((u) => u.mode === "none").length;
+  const proxied = users.length - direct;
+  openDialog(
+    `<h2>${esc(t("Configurer « {name} »", { name: addon.name }))}</h2>` +
+      `<ol class="cfg-steps"><li>${esc(t("Ouvrez la page de l’addon et modifiez sa configuration."))}</li><li>${esc(t("Copiez la nouvelle URL du manifest que l’addon vous donne (lien d’installation)."))}</li><li>${esc(t("Collez-la ci-dessous puis enregistrez."))}</li></ol>` +
+      `<p><button type="button" id="cfg-open">${esc(t("Ouvrir la page de l’addon"))} ↗</button></p>` +
+      `<form id="cfg-form" class="form"><label>${esc(t("Nouvelle URL du manifest"))}<input id="cfg-url" name="url" required autocomplete="off" placeholder="https://…/manifest.json"></label></form>` +
+      `<p class="hint">${esc(t("Profils sans proxy : la nouvelle URL leur est envoyée ({n}), avec une sauvegarde pour chacun. Profils en proxy ({p}) : leur lien ne change pas, le relais utilise directement la nouvelle configuration.", { n: direct, p: proxied }))}</p>` +
+      `<div id="cfg-error"></div><div class="dialog-actions"><button type="button" data-close>${esc(t("Annuler"))}</button><button type="submit" form="cfg-form" id="cfg-save" class="primary">${esc(t("Enregistrer"))}</button></div>`,
+  );
+  $("#cfg-open").onclick = () => window.open(configurePage(addon.url), "_blank", "noopener,noreferrer");
+  $("#cfg-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const button = $("#cfg-save");
+    button.disabled = true;
+    $("#cfg-error").innerHTML = `<p class="muted">${esc(t("Mise à jour des profils… (jusqu’à trois essais en cas d’erreur)"))}</p>`;
+    document.body.classList.add("busy");
+    try {
+      const result = await api("library/reconfigure", { id: addon.id, url: $("#cfg-url").value.trim() });
+      $("#dialog").close();
+      await render();
+      toast(t("« {name} » reconfiguré : {n} profil(s) sans proxy mis à jour, {p} lien(s) en proxy redirigé(s).", { name: addon.name, n: result.updated?.length || 0, p: result.relinked || 0 }));
+    } catch (error) {
+      button.disabled = false;
+      $("#cfg-error").innerHTML = `<p class="error">${esc(error.message)}</p>`;
     } finally {
       document.body.classList.remove("busy");
     }

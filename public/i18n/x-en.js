@@ -1499,4 +1499,17 @@ export default {
   "« {name} » supprimé et retiré de {n} profil(s).": "“{name}” deleted and removed from {n} profile(s).",
   "« {name} » supprimé de la bibliothèque.": "“{name}” deleted from the library.",
   "Avant suppression d’un addon de la bibliothèque": "Before deleting a library addon",
+  // Configuration d’addon (Stremio)
+  "Configurer": "Configure",
+  "Ouvrir la page de configuration de l’addon": "Open the addon’s configuration page",
+  "Configurer « {name} »": "Configure “{name}”",
+  "Ouvrez la page de l’addon et modifiez sa configuration.": "Open the addon’s page and change its configuration.",
+  "Copiez la nouvelle URL du manifest que l’addon vous donne (lien d’installation).": "Copy the new manifest URL the addon gives you (install link).",
+  "Collez-la ci-dessous puis enregistrez.": "Paste it below, then save.",
+  "Ouvrir la page de l’addon": "Open the addon’s page",
+  "Nouvelle URL du manifest": "New manifest URL",
+  "Profils sans proxy : la nouvelle URL leur est envoyée ({n}), avec une sauvegarde pour chacun. Profils en proxy ({p}) : leur lien ne change pas, le relais utilise directement la nouvelle configuration.": "Profiles without proxy: the new URL is sent to them ({n}), with a backup for each. Proxied profiles ({p}): their link does not change, the relay uses the new configuration directly.",
+  "Mise à jour des profils… (jusqu’à trois essais en cas d’erreur)": "Updating profiles… (up to three attempts on errors)",
+  "« {name} » reconfiguré : {n} profil(s) sans proxy mis à jour, {p} lien(s) en proxy redirigé(s).": "“{name}” reconfigured: {n} profile(s) without proxy updated, {p} proxied link(s) redirected.",
+  "Avant reconfiguration d’un addon": "Before reconfiguring an addon",
 };

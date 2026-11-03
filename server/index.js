@@ -7,7 +7,7 @@ import { createHistoryStore } from "./history-store.js";
 import { createNowPlaying } from "./now-playing.js";
 import { RESTORE_PARTS, expiredBackups, profileSlice, profilesInSnapshot } from "./backups.js";
 import { getXperienceAvatars } from "./xperience.js";
-import { readManifestLogo } from "./manifest.js";
+import { readManifestInfo, readManifestLogo } from "./manifest.js";
 import { createIntegratedProxy, normalizeProxyUrl, proxySummary, normalizeManifestUrl } from "./integrated-proxy.js";
 import { createProxyDiagnostics } from "./proxy-diagnostics.js";
 import {
@@ -980,6 +980,78 @@ const LIBRARY_REMOVE_RETRY_MS = (process.env.LIBRARY_REMOVE_RETRY_MS || "2000,50
   .split(",")
   .map(Number)
   .filter((ms) => Number.isFinite(ms) && ms >= 0);
+// Run `work` on every profile of every account, read live (the background
+// mirror may lag), with the per-profile write lock. A failed account / profile
+// is retried after the LIBRARY_REMOVE_RETRY_MS waits (transient network error,
+// a write already running, rate limit…); only what still fails after the last
+// attempt is reported. work({ a, t, p, profileId, ref, label }) resolves true
+// when it changed the profile.
+async function forEveryProfile(work, logLabel) {
+  const changed = new Map(); // ref -> label
+  const failures = new Map(); // ref ("acc:profile" or "acc:*") -> { label, error }
+  const runProfile = async (a, t, p, accountName) => {
+    const profileId = Number(p.profile_index);
+    const ref = `${a.id}:${profileId}`;
+    const label = `${accountName} · ${p.name || `Profil ${profileId}`}`;
+    if (locks.has(ref)) return failures.set(ref, { label, error: "une écriture est en cours" });
+    locks.add(ref);
+    try {
+      if (await work({ a, t, p, profileId, ref, label })) changed.set(ref, label);
+      failures.delete(ref);
+    } catch (error) {
+      failures.set(ref, { label, error: error.message });
+    } finally {
+      locks.delete(ref);
+    }
+  };
+  // Every account in full at first, then only what failed.
+  let pending = state.accounts.map((a) => ({ a, only: null }));
+  for (let attempt = 0; pending.length; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, LIBRARY_REMOVE_RETRY_MS[attempt - 1]));
+    for (const { a, only } of pending) {
+      const accountName = a.name || a.email;
+      let t, profiles;
+      try {
+        t = await token(a);
+        profiles = await rpc("sync_pull_profiles", {}, t, a.provider);
+        failures.delete(`${a.id}:*`);
+      } catch (error) {
+        failures.set(`${a.id}:*`, { label: accountName, error: error.message });
+        continue;
+      }
+      for (const p of profiles)
+        if (!only || only.has(Number(p.profile_index))) await runProfile(a, t, p, accountName);
+    }
+    if (attempt >= LIBRARY_REMOVE_RETRY_MS.length) break;
+    const retry = new Map(); // accountId -> null (whole account) | Set of profile ids
+    for (const ref of failures.keys()) {
+      const [accountId, profile] = ref.split(":");
+      if (profile === "*") retry.set(accountId, null);
+      else if (retry.get(accountId) !== null) retry.set(accountId, (retry.get(accountId) || new Set()).add(Number(profile)));
+    }
+    pending = [...retry].map(([accountId, only]) => ({ a: state.accounts.find((x) => x.id === accountId), only })).filter((job) => job.a);
+    if (pending.length) log.info("library", `${logLabel} : nouvel essai`, { attempt: attempt + 2, pending: failures.size });
+  }
+  return { changed, failed: [...failures].map(([ref, f]) => ({ ref, ...f })) };
+}
+// A profile's own addon rows (not the primary's it may inherit).
+const ownAddonRows = async (a, t, p) => {
+  const rows = await call(
+    `/rest/v1/addons?user_id=eq.${encodeURIComponent(p.user_id)}&profile_id=eq.${Number(p.profile_index)}&order=sort_order.asc`,
+    null,
+    t,
+    "GET",
+    a.provider,
+  );
+  return Array.isArray(rows) ? rows : [];
+};
+// A library manifest address: HTTP(S), ending in /manifest.json.
+const manifestAddress = (value) => {
+  const u = new URL(normalizeUrl(value));
+  if (!u.pathname.endsWith("/manifest.json")) u.pathname = u.pathname.replace(/\/$/, "") + "/manifest.json";
+  return u.href;
+};
+const listRefs = (map) => [...map].map(([ref, label]) => ({ ref, label }));
 const writableList = (rows) =>
   rows.map((r, i) => ({
     url: normalizeUrl(r.url),
@@ -1220,7 +1292,7 @@ const server = http.createServer(async (req, res) => {
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
-        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/usage", "/api/library/assign-many", "/api/library/set-modes",
+        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/reconfigure", "/api/library/usage", "/api/library/assign-many", "/api/library/set-modes",
         "/api/backup/create", "/api/backup/delete", "/api/backup/restore", "/api/backup/restore-profile",
         "/api/backup/restore-file", "/api/backup/download",
       ]);
@@ -2125,19 +2197,16 @@ const server = http.createServer(async (req, res) => {
       }
       if (route === "/api/library/save") {
         assert(typeof b.name === "string" && b.name.trim(), "Nom requis");
-        let address = normalizeUrl(b.url);
-        if (!new URL(address).pathname.endsWith("/manifest.json")) {
-          const u = new URL(address);
-          u.pathname = u.pathname.replace(/\/$/, "") + "/manifest.json";
-          address = u.href;
-        }
+        const address = manifestAddress(b.url);
         const previous = state.library.find((item) => item.id === b.id);
-        const logo = await readManifestLogo(address).catch(() => previous?.logo || null);
+        const info = await readManifestInfo(address).catch(() => null);
         const item = {
           id: b.id || crypto.randomUUID(),
           name: b.name.trim(),
           url: address,
-          logo,
+          logo: info ? info.logo : previous?.logo || null,
+          // Stremio "Configure" (manifest behaviorHints); null = unknown (unreachable).
+          configurable: info ? info.configurable : null,
           logo_checked_at: new Date().toISOString(),
         };
         state.library = state.library.filter((i) => i.id !== item.id);
@@ -2147,21 +2216,27 @@ const server = http.createServer(async (req, res) => {
       }
       if (route === "/api/library/refresh-logos") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
+        // Entries saved before a field existed: read their manifest once (logo,
+        // Stremio "Configure" hint); an unreachable one is re-checked daily so a
+        // passing outage doesn't hide its "Configure" button for good. An
+        // existing logo is kept.
+        const stale = (item) => item.configurable === null && Date.now() - (Date.parse(item.logo_checked_at) || 0) > 864e5;
         await Promise.all(state.library
-          .filter((item) => !Object.hasOwn(item, "logo"))
+          .filter((item) => !Object.hasOwn(item, "logo") || !Object.hasOwn(item, "configurable") || stale(item))
           .map(async (item) => {
-            item.logo = await readManifestLogo(item.url).catch(() => null);
+            const info = await readManifestInfo(item.url).catch(() => null);
+            if (!Object.hasOwn(item, "logo")) item.logo = info?.logo ?? null;
+            item.configurable = info ? info.configurable : null;
             item.logo_checked_at = new Date().toISOString();
           }));
         save();
         return json(res, { library: state.library });
       }
       if (route === "/api/library/remove") {
-        // Deleting a library addon first removes it from every profile using it
-        // (all accounts, read live — the mirror may lag). The library entry is
-        // only deleted when every profile was checked and cleaned; otherwise it
-        // stays and the reply lists what failed (and what was already removed,
-        // so a retry simply finishes the job).
+        // Deleting a library addon first removes it from every profile using it.
+        // The library entry is only deleted when every profile was checked and
+        // cleaned; otherwise it stays and the reply lists what failed (and what
+        // was already removed, so a retry simply finishes the job).
         assert(req.method === "POST", "Méthode non autorisée", 405);
         const item = state.library.find((x) => x.id === b.id);
         assert(item, "Addon introuvable", 404);
@@ -2173,87 +2248,31 @@ const server = http.createServer(async (req, res) => {
             return false;
           }
         };
-        // Several attempts before giving up: a failed account / profile is
-        // retried after a short wait (transient network error, a write already
-        // running on the profile, rate limit…). Only what still fails after the
-        // last attempt is reported.
-        const removed = new Map(); // ref -> label (addon removed from it)
-        const failures = new Map(); // ref ("acc:profile" or "acc:*") -> { label, error }
         const backedUp = new Set(); // one safety backup per profile, not per attempt
-        const cleanProfile = async (a, t, p, accountName) => {
-          const profileId = Number(p.profile_index);
-          const ref = `${a.id}:${profileId}`;
-          const label = `${accountName} · ${p.name || `Profil ${profileId}`}`;
-          if (locks.has(ref)) return failures.set(ref, { label, error: "une écriture est en cours" });
-          locks.add(ref);
-          try {
-            // The profile's own rows (not the primary's it may inherit).
-            const rows = await call(
-              `/rest/v1/addons?user_id=eq.${encodeURIComponent(p.user_id)}&profile_id=eq.${profileId}&order=sort_order.asc`,
-              null,
-              t,
-              "GET",
-              a.provider,
-            );
-            if (Array.isArray(rows) && rows.some(matches)) {
-              if (!backedUp.has(ref)) {
-                await backup(a, "Avant suppression d’un addon de la bibliothèque", { profileId });
-                backedUp.add(ref);
-              }
-              const kept = writableList(rows.filter((row) => !matches(row)));
-              await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: kept, ...originId(a) }, t, a.provider);
-              addonProxy.reconcile(a.id, profileId, kept.map((row) => row.url));
-              historyStore.refreshAddons(ref);
-              removed.set(ref, label);
-            }
-            failures.delete(ref);
-          } catch (error) {
-            failures.set(ref, { label, error: error.message });
-          } finally {
-            locks.delete(ref);
+        const { changed: removed, failed } = await forEveryProfile(async ({ a, t, p, profileId, ref }) => {
+          const rows = await ownAddonRows(a, t, p);
+          if (!rows.some(matches)) return false;
+          if (!backedUp.has(ref)) {
+            await backup(a, "Avant suppression d’un addon de la bibliothèque", { profileId });
+            backedUp.add(ref);
           }
-        };
-        // Pending work: every account in full at first, then only what failed.
-        let pending = state.accounts.map((a) => ({ a, only: null }));
-        for (let attempt = 0; pending.length; attempt++) {
-          if (attempt) await new Promise((resolve) => setTimeout(resolve, LIBRARY_REMOVE_RETRY_MS[attempt - 1]));
-          for (const { a, only } of pending) {
-            const accountName = a.name || a.email;
-            let t, profiles;
-            try {
-              t = await token(a);
-              profiles = await rpc("sync_pull_profiles", {}, t, a.provider);
-              failures.delete(`${a.id}:*`);
-            } catch (error) {
-              failures.set(`${a.id}:*`, { label: accountName, error: error.message });
-              continue;
-            }
-            for (const p of profiles)
-              if (!only || only.has(Number(p.profile_index))) await cleanProfile(a, t, p, accountName);
-          }
-          if (attempt >= LIBRARY_REMOVE_RETRY_MS.length) break;
-          const retry = new Map(); // accountId -> null (whole account) | Set of profile ids
-          for (const ref of failures.keys()) {
-            const [accountId, profile] = ref.split(":");
-            if (profile === "*") retry.set(accountId, null);
-            else if (retry.get(accountId) !== null) retry.set(accountId, (retry.get(accountId) || new Set()).add(Number(profile)));
-          }
-          pending = [...retry].map(([accountId, only]) => ({ a: state.accounts.find((x) => x.id === accountId), only })).filter((job) => job.a);
-          if (pending.length) log.info("library", "suppression d’addon : nouvel essai", { addon: item.name, attempt: attempt + 2, pending: failures.size });
-        }
-        const failed = [...failures].map(([ref, f]) => ({ ref, ...f }));
+          const kept = writableList(rows.filter((row) => !matches(row)));
+          await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: kept, ...originId(a) }, t, a.provider);
+          addonProxy.reconcile(a.id, profileId, kept.map((row) => row.url));
+          historyStore.refreshAddons(ref);
+          return true;
+        }, `suppression de « ${item.name} »`);
         if (failed.length) {
-          log.warn("library", "suppression d’addon interrompue", { addon: item.name, removed: removed.length, failed: failed.length });
+          log.warn("library", "suppression d’addon interrompue", { addon: item.name, removed: removed.size, failed: failed.length });
           const details = failed.map((f) => `${f.label} (${f.error})`).join(" ; ");
           const done = removed.size
             ? ` Il a déjà été retiré de ${removed.size} profil(s) : ${[...removed.values()].join(", ")}.`
             : "";
-          const attempts = LIBRARY_REMOVE_RETRY_MS.length + 1;
           return json(
             res,
             {
-              error: `« ${item.name} » n’a pas été supprimé de la bibliothèque : impossible de le retirer de ${failed.length} profil(s) après ${attempts} essais — ${details}.${done} Corrigez le problème puis réessayez.`,
-              removed: [...removed].map(([ref, label]) => ({ ref, label })),
+              error: `« ${item.name} » n’a pas été supprimé de la bibliothèque : impossible de le retirer de ${failed.length} profil(s) après ${LIBRARY_REMOVE_RETRY_MS.length + 1} essais — ${details}.${done} Corrigez le problème puis réessayez.`,
+              removed: listRefs(removed),
               failed,
             },
             409,
@@ -2262,7 +2281,82 @@ const server = http.createServer(async (req, res) => {
         state.library = state.library.filter((i) => i.id !== item.id);
         save();
         log.info("library", "addon supprimé de la bibliothèque et des profils", { addon: item.name, profiles: removed.size });
-        return json(res, { ok: true, removed: [...removed].map(([ref, label]) => ({ ref, label })) });
+        return json(res, { ok: true, removed: listRefs(removed) });
+      }
+      if (route === "/api/library/reconfigure") {
+        // New configuration of an addon (Stremio "Configure"): the new manifest
+        // URL goes to every profile using the addon WITHOUT proxy (backup per
+        // profile, retries). Proxied profiles keep their relay link — the relay
+        // is pointed at the new configuration instead. Library and relay change
+        // only once every profile is done; a retry skips profiles already updated.
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const item = state.library.find((x) => x.id === b.id);
+        assert(item, "Addon introuvable", 404);
+        const address = manifestAddress(b.url);
+        assert(address !== item.url, "C’est déjà l’URL de cet addon.", 400);
+        const [current, next] = await Promise.all([
+          readManifestInfo(item.url).catch(() => null),
+          readManifestInfo(address).catch((error) => ({ error: error.message })),
+        ]);
+        assert(!next.error, `Impossible de lire le manifest de la nouvelle URL : ${next.error}`, 400);
+        assert(
+          !current?.id || !next.id || current.id === next.id,
+          `Cette URL correspond à un autre addon (« ${next.id} »), pas à « ${item.name} ».`,
+          400,
+        );
+        const oldKey = addonManifestKey(item.url);
+        const isDirectOld = (row) => {
+          try {
+            return !addonProxy.describe(row.url) && addonManifestKey(row.url) === oldKey;
+          } catch {
+            return false;
+          }
+        };
+        const backedUp = new Set();
+        const { changed: updated, failed } = await forEveryProfile(async ({ a, t, p, profileId, ref }) => {
+          const rows = await ownAddonRows(a, t, p);
+          if (!rows.some(isDirectOld)) return false;
+          if (!backedUp.has(ref)) {
+            await backup(a, "Avant reconfiguration d’un addon", { profileId });
+            backedUp.add(ref);
+          }
+          const nextRows = writableList(rows.map((row) => (isDirectOld(row) ? { ...row, url: address } : row)));
+          await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: nextRows, ...originId(a) }, t, a.provider);
+          historyStore.refreshAddons(ref);
+          return true;
+        }, `reconfiguration de « ${item.name} »`);
+        if (failed.length) {
+          log.warn("library", "reconfiguration d’addon interrompue", { addon: item.name, updated: updated.size, failed: failed.length });
+          const details = failed.map((f) => `${f.label} (${f.error})`).join(" ; ");
+          const done = updated.size
+            ? ` La nouvelle URL est déjà en place sur ${updated.size} profil(s) : ${[...updated.values()].join(", ")}.`
+            : "";
+          return json(
+            res,
+            {
+              error: `« ${item.name} » n’a pas été reconfiguré : impossible de mettre à jour ${failed.length} profil(s) après ${LIBRARY_REMOVE_RETRY_MS.length + 1} essais — ${details}.${done} La bibliothèque et les liens en proxy gardent l’ancienne configuration ; corrigez le problème puis réessayez avec la même URL.`,
+              updated: listRefs(updated),
+              failed,
+            },
+            409,
+          );
+        }
+        // Proxied installs: same relay links, new upstream configuration.
+        const oldUpstream = normalizeManifestUrl(item.url);
+        const newUpstream = normalizeManifestUrl(address);
+        let relinked = 0;
+        for (const entry of [...state.proxyGrants, ...state.proxyAddons])
+          if (entry.manifestUrl === oldUpstream) {
+            entry.manifestUrl = newUpstream;
+            relinked++;
+          }
+        item.url = address;
+        item.logo = next.logo || item.logo || null;
+        item.configurable = next.configurable;
+        item.logo_checked_at = new Date().toISOString();
+        save();
+        log.info("library", "addon reconfiguré", { addon: item.name, profiles: updated.size, relayLinks: relinked });
+        return json(res, { ok: true, updated: listRefs(updated), relinked, item });
       }
       if (route === "/api/library/usage") {
         assert(req.method === "GET", "Méthode non autorisée", 405);

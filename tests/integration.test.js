@@ -286,6 +286,16 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.deepEqual(deleted.data.removed.map((r) => r.ref), ["test-user:2"]);
   assert.deepEqual(addonRows[2].map((row) => row.name), ["Other"]);
   assert.ok(!(await call("state")).data.library.some((item) => item.id === lib2.data.id));
+  // Reconfigure guards: same URL refused; an unreadable new manifest is refused
+  // before any profile, the library or the relay is touched.
+  const before = JSON.stringify(addonRows);
+  const same = await call("library/reconfigure", { id: lib.data.id, url: lib.data.url });
+  assert.equal(same.status, 400);
+  const unreadable = await call("library/reconfigure", { id: lib.data.id, url: "https://example.invalid/new-config/manifest.json" });
+  assert.equal(unreadable.status, 400);
+  assert.match(unreadable.data.error, /Impossible de lire le manifest de la nouvelle URL/);
+  assert.equal(JSON.stringify(addonRows), before);
+  assert.equal((await call("state")).data.library.find((item) => item.id === lib.data.id).url, lib.data.url);
   addonRows[1] = []; // reset so later assertions see a clean profile
   addonRows[2] = [];
   const plan = await call("preview", {
