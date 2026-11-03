@@ -43,6 +43,7 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   };
   const versions = { 1: "2026-01-01T00:00:00Z", 2: "2026-01-02T00:00:00Z" };
   const addonRows = { 1: [], 2: [] }; // installed addons per profile_index (stateful)
+  const failAddons = new Map(); // profile_index -> remaining failed addon writes (Infinity = always)
   let writes = 0,
     failPlugins = false,
     profilePatch,
@@ -108,6 +109,10 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
     }
     if (route === "/rest/v1/plugins") return reply([]);
     if (route.endsWith("sync_push_addons")) {
+      if (failAddons.get(b.p_profile_id) > 0) {
+        failAddons.set(b.p_profile_id, failAddons.get(b.p_profile_id) - 1);
+        return reply({ message: "Simulated addon failure" }, 500);
+      }
       addonRows[b.p_profile_id] = b.p_addons;
       return reply(null);
     }
@@ -140,6 +145,7 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
       HOST: "127.0.0.1",
       DATA_DIR: folder,
       NUVIO_API_URL: `http://127.0.0.1:${mock.address().port}`,
+      LIBRARY_REMOVE_RETRY_MS: "20,20",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -259,7 +265,29 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.equal((await call("apply", { id: detach.data.id })).status, 200);
   assert.equal(addonRows[1].length, 1);
   assert.equal(addonRows[1][0].name, "Second addon");
+  // Deleting a library addon removes it from every profile first; any failure
+  // keeps the library entry and explains which profiles failed / were done.
+  addonRows[2] = [
+    { url: lib2.data.url, name: "Second addon", enabled: true, sort_order: 0 },
+    { url: "https://example.invalid/other/manifest.json", name: "Other", enabled: true, sort_order: 1 },
+  ];
+  failAddons.set(2, Infinity); // persistent failure: still failing after every attempt
+  const blocked = await call("library/remove", { id: lib2.data.id });
+  assert.equal(blocked.status, 409);
+  assert.match(blocked.data.error, /n’a pas été supprimé de la bibliothèque/);
+  assert.match(blocked.data.error, /après 3 essais/);
+  assert.match(blocked.data.error, /Destination test/);
+  assert.deepEqual(blocked.data.removed.map((r) => r.ref), ["test-user:1"]);
+  assert.equal(addonRows[1].length, 0); // already removed from profile 1
+  assert.ok((await call("state")).data.library.some((item) => item.id === lib2.data.id)); // kept
+  failAddons.set(2, 1); // transient failure: the next attempt succeeds, no error shown
+  const deleted = await call("library/remove", { id: lib2.data.id });
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(deleted.data.removed.map((r) => r.ref), ["test-user:2"]);
+  assert.deepEqual(addonRows[2].map((row) => row.name), ["Other"]);
+  assert.ok(!(await call("state")).data.library.some((item) => item.id === lib2.data.id));
   addonRows[1] = []; // reset so later assertions see a clean profile
+  addonRows[2] = [];
   const plan = await call("preview", {
     accountId: "test-user",
     profileId: 2,
@@ -298,9 +326,9 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
     assert.equal((await call("backup/create", { accountId: "test-user" })).status, 200);
   const limitedBackups = await call("state");
   const accountBackups = limitedBackups.data.backups.filter((item) => item.accountId === "test-user");
-  // Manual backups are kept; only automatic ones rotate (10 per account).
+  // Manual backups are kept; only automatic ones rotate (15 per profile).
   assert.equal(accountBackups.filter((item) => item.manual).length, 4);
-  assert.ok(accountBackups.filter((item) => !item.manual).length <= 10);
+  assert.ok(accountBackups.filter((item) => !item.manual).length <= 15);
   assert.ok(accountBackups.every((item) => Array.isArray(item.profiles)));
   // A profile that is not in the backup cannot be restored from it.
   assert.equal(

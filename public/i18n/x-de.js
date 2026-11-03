@@ -1473,4 +1473,15 @@ export default {
   "Appareil inconnu": "Unbekanntes Gerät",
   "Web": "Web",
   "Ordinateur": "Computer",
+  // Suppression d’un addon de la bibliothèque
+  "Supprimer « {name} » ?": "„{name}“ löschen?",
+  "L’addon sera retiré de tous les profils qui l’utilisent, puis supprimé de la bibliothèque.": "Das Addon wird aus allen Profilen entfernt, die es nutzen, und dann aus der Bibliothek gelöscht.",
+  "Il est actuellement utilisé par {n} profils.": "Es wird derzeit von {n} Profilen genutzt.",
+  "Il est actuellement utilisé par {n} profil.": "Es wird derzeit von {n} Profil genutzt.",
+  "Aucun profil ne l’utilise d’après la dernière synchronisation.": "Laut letzter Synchronisierung nutzt es kein Profil.",
+  "Tous les profils sont vérifiés au moment de la suppression. Une sauvegarde est créée pour chaque profil modifié. En cas d’erreur, trois essais sont faits ; si l’addon ne peut toujours pas être retiré d’un profil, il reste dans la bibliothèque.": "Beim Löschen werden alle Profile geprüft. Für jedes geänderte Profil wird eine Sicherung erstellt. Bei Fehlern gibt es drei Versuche; lässt sich das Addon dann immer noch nicht aus einem Profil entfernen, bleibt es in der Bibliothek.",
+  "Vérification des profils… (jusqu’à trois essais en cas d’erreur)": "Profile werden geprüft… (bis zu drei Versuche bei Fehlern)",
+  "« {name} » supprimé et retiré de {n} profil(s).": "„{name}“ gelöscht und aus {n} Profil(en) entfernt.",
+  "« {name} » supprimé de la bibliothèque.": "„{name}“ aus der Bibliothek gelöscht.",
+  "Avant suppression d’un addon de la bibliothèque": "Vor dem Löschen eines Bibliotheks-Addons",
 };

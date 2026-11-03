@@ -974,6 +974,12 @@ async function resolveAddonLogo(url) {
   addonLogoCache.set(key, { logo, at: Date.now() });
   return logo;
 }
+// Waits between attempts when removing a library addon from every profile
+// (3 attempts in all by default). LIBRARY_REMOVE_RETRY_MS="ms,ms" overrides it.
+const LIBRARY_REMOVE_RETRY_MS = (process.env.LIBRARY_REMOVE_RETRY_MS || "2000,5000")
+  .split(",")
+  .map(Number)
+  .filter((ms) => Number.isFinite(ms) && ms >= 0);
 const writableList = (rows) =>
   rows.map((r, i) => ({
     url: normalizeUrl(r.url),
@@ -2151,9 +2157,112 @@ const server = http.createServer(async (req, res) => {
         return json(res, { library: state.library });
       }
       if (route === "/api/library/remove") {
-        state.library = state.library.filter((i) => i.id !== b.id);
+        // Deleting a library addon first removes it from every profile using it
+        // (all accounts, read live — the mirror may lag). The library entry is
+        // only deleted when every profile was checked and cleaned; otherwise it
+        // stays and the reply lists what failed (and what was already removed,
+        // so a retry simply finishes the job).
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const item = state.library.find((x) => x.id === b.id);
+        assert(item, "Addon introuvable", 404);
+        const manifestKey = addonManifestKey(item.url);
+        const matches = (row) => {
+          try {
+            return addonManifestKey(row.url) === manifestKey;
+          } catch {
+            return false;
+          }
+        };
+        // Several attempts before giving up: a failed account / profile is
+        // retried after a short wait (transient network error, a write already
+        // running on the profile, rate limit…). Only what still fails after the
+        // last attempt is reported.
+        const removed = new Map(); // ref -> label (addon removed from it)
+        const failures = new Map(); // ref ("acc:profile" or "acc:*") -> { label, error }
+        const backedUp = new Set(); // one safety backup per profile, not per attempt
+        const cleanProfile = async (a, t, p, accountName) => {
+          const profileId = Number(p.profile_index);
+          const ref = `${a.id}:${profileId}`;
+          const label = `${accountName} · ${p.name || `Profil ${profileId}`}`;
+          if (locks.has(ref)) return failures.set(ref, { label, error: "une écriture est en cours" });
+          locks.add(ref);
+          try {
+            // The profile's own rows (not the primary's it may inherit).
+            const rows = await call(
+              `/rest/v1/addons?user_id=eq.${encodeURIComponent(p.user_id)}&profile_id=eq.${profileId}&order=sort_order.asc`,
+              null,
+              t,
+              "GET",
+              a.provider,
+            );
+            if (Array.isArray(rows) && rows.some(matches)) {
+              if (!backedUp.has(ref)) {
+                await backup(a, "Avant suppression d’un addon de la bibliothèque", { profileId });
+                backedUp.add(ref);
+              }
+              const kept = writableList(rows.filter((row) => !matches(row)));
+              await rpc("sync_push_addons", { p_profile_id: profileId, p_addons: kept, ...originId(a) }, t, a.provider);
+              addonProxy.reconcile(a.id, profileId, kept.map((row) => row.url));
+              historyStore.refreshAddons(ref);
+              removed.set(ref, label);
+            }
+            failures.delete(ref);
+          } catch (error) {
+            failures.set(ref, { label, error: error.message });
+          } finally {
+            locks.delete(ref);
+          }
+        };
+        // Pending work: every account in full at first, then only what failed.
+        let pending = state.accounts.map((a) => ({ a, only: null }));
+        for (let attempt = 0; pending.length; attempt++) {
+          if (attempt) await new Promise((resolve) => setTimeout(resolve, LIBRARY_REMOVE_RETRY_MS[attempt - 1]));
+          for (const { a, only } of pending) {
+            const accountName = a.name || a.email;
+            let t, profiles;
+            try {
+              t = await token(a);
+              profiles = await rpc("sync_pull_profiles", {}, t, a.provider);
+              failures.delete(`${a.id}:*`);
+            } catch (error) {
+              failures.set(`${a.id}:*`, { label: accountName, error: error.message });
+              continue;
+            }
+            for (const p of profiles)
+              if (!only || only.has(Number(p.profile_index))) await cleanProfile(a, t, p, accountName);
+          }
+          if (attempt >= LIBRARY_REMOVE_RETRY_MS.length) break;
+          const retry = new Map(); // accountId -> null (whole account) | Set of profile ids
+          for (const ref of failures.keys()) {
+            const [accountId, profile] = ref.split(":");
+            if (profile === "*") retry.set(accountId, null);
+            else if (retry.get(accountId) !== null) retry.set(accountId, (retry.get(accountId) || new Set()).add(Number(profile)));
+          }
+          pending = [...retry].map(([accountId, only]) => ({ a: state.accounts.find((x) => x.id === accountId), only })).filter((job) => job.a);
+          if (pending.length) log.info("library", "suppression d’addon : nouvel essai", { addon: item.name, attempt: attempt + 2, pending: failures.size });
+        }
+        const failed = [...failures].map(([ref, f]) => ({ ref, ...f }));
+        if (failed.length) {
+          log.warn("library", "suppression d’addon interrompue", { addon: item.name, removed: removed.length, failed: failed.length });
+          const details = failed.map((f) => `${f.label} (${f.error})`).join(" ; ");
+          const done = removed.size
+            ? ` Il a déjà été retiré de ${removed.size} profil(s) : ${[...removed.values()].join(", ")}.`
+            : "";
+          const attempts = LIBRARY_REMOVE_RETRY_MS.length + 1;
+          return json(
+            res,
+            {
+              error: `« ${item.name} » n’a pas été supprimé de la bibliothèque : impossible de le retirer de ${failed.length} profil(s) après ${attempts} essais — ${details}.${done} Corrigez le problème puis réessayez.`,
+              removed: [...removed].map(([ref, label]) => ({ ref, label })),
+              failed,
+            },
+            409,
+          );
+        }
+        state.library = state.library.filter((i) => i.id !== item.id);
         save();
-        return json(res, { ok: true });
+        log.info("library", "addon supprimé de la bibliothèque et des profils", { addon: item.name, profiles: removed.size });
+        return json(res, { ok: true, removed: [...removed].map(([ref, label]) => ({ ref, label })) });
       }
       if (route === "/api/library/usage") {
         assert(req.method === "GET", "Méthode non autorisée", 405);

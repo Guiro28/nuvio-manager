@@ -1337,17 +1337,40 @@ async function renderLibrary() {
   $$("[data-assign-many]").forEach(
     (b) => (b.onclick = () => run(() => assignToProfiles(b.dataset.assignMany))),
   );
-  $$("[data-delete]").forEach(
-    (b) =>
-      (b.onclick = () =>
-        run(async () => {
-          await api("library/remove", { id: b.dataset.delete });
-          await render();
-          toast(
-            t("Retiré du catalogue. Les installations Nuvio restent en place."),
-          );
-        })),
+  $$("[data-delete]").forEach((b) => {
+    b.onclick = () => removeLibraryAddon(state.library.find((a) => a.id === b.dataset.delete), usage[b.dataset.delete] || []);
+  });
+}
+// Deleting a library addon also removes it from every profile using it. The
+// server deletes the library entry only if every profile was cleaned; any
+// failure keeps the addon and is explained here (not in a passing toast).
+function removeLibraryAddon(addon, users) {
+  if (!addon) return;
+  const known = users.length
+    ? t(users.length > 1 ? "Il est actuellement utilisé par {n} profils." : "Il est actuellement utilisé par {n} profil.", { n: users.length })
+    : t("Aucun profil ne l’utilise d’après la dernière synchronisation.");
+  openDialog(
+    `<h2>${esc(t("Supprimer « {name} » ?", { name: addon.name }))}</h2><p>${esc(t("L’addon sera retiré de tous les profils qui l’utilisent, puis supprimé de la bibliothèque."))} ${esc(known)}</p><p class="hint">${esc(t("Tous les profils sont vérifiés au moment de la suppression. Une sauvegarde est créée pour chaque profil modifié. En cas d’erreur, trois essais sont faits ; si l’addon ne peut toujours pas être retiré d’un profil, il reste dans la bibliothèque."))}</p><div id="lib-remove-error"></div><div class="dialog-actions"><button data-close>${esc(t("Annuler"))}</button><button id="lib-remove-go" class="danger">${esc(t("Supprimer"))}</button></div>`,
   );
+  $("#lib-remove-go").onclick = async () => {
+    const button = $("#lib-remove-go");
+    button.disabled = true;
+    $("#lib-remove-error").innerHTML = `<p class="muted">${esc(t("Vérification des profils… (jusqu’à trois essais en cas d’erreur)"))}</p>`;
+    document.body.classList.add("busy");
+    try {
+      const result = await api("library/remove", { id: addon.id });
+      $("#dialog").close();
+      await render();
+      const n = result.removed?.length || 0;
+      toast(n ? t("« {name} » supprimé et retiré de {n} profil(s).", { name: addon.name, n }) : t("« {name} » supprimé de la bibliothèque.", { name: addon.name }));
+    } catch (error) {
+      button.disabled = false;
+      $("#lib-remove-error").innerHTML = `<p class="error">${esc(error.message)}</p>`;
+      if (page === "library") renderLibrary(); // usage may have changed (partial removal)
+    } finally {
+      document.body.classList.remove("busy");
+    }
+  };
 }
 // Window opened from an addon's profile count: a STAGED editor of the proxy mode
 // for every profile using it. Mode changes and removals are collected locally and
