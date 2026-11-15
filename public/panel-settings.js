@@ -13,6 +13,21 @@ const NOTIFY_GROUPS = [
   ["Sauvegardes et sécurité", [["backup", "Sauvegarde automatique échouée"], ["login", "Connexions échouées répétées au manager"]]],
   ["Système", [["started", "Démarrage ou mise à jour du manager"], ["summary", "Résumé quotidien"]]],
 ];
+// Settings tabs; the open one is kept while the page re-renders (session only).
+const SETTINGS_TABS = [
+  ["general", "Général"],
+  ["services", "Services"],
+  ["proxy", "Proxy"],
+  ["notifications", "Notifications"],
+  ["access", "Accès et sécurité"],
+];
+let settingsTab = (() => {
+  try {
+    return sessionStorage.getItem("nm-settings-tab") || "general";
+  } catch {
+    return "general";
+  }
+})();
 const browserTimeZone = () => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
@@ -29,8 +44,12 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
   const discord = config.discord || { configured: false, events: {}, summaryHour: 20, timeZone: "" };
   const lastSyncLabel = (ms) =>
     ms ? t("Dernière synchronisation : {date}", { date: new Date(ms).toLocaleString() }) : t("Jamais synchronisé.");
+  if (!SETTINGS_TABS.some(([key]) => key === settingsTab)) settingsTab = "general";
   container.innerHTML = `
-    <section class="panel">
+    <div class="settings-section-tabs settings-page-tabs" role="tablist" aria-label="${esc(t("Catégories de paramètres"))}">
+      ${SETTINGS_TABS.map(([key, label]) => `<button type="button" role="tab" data-settings-page="${key}" aria-selected="${settingsTab === key}" class="${settingsTab === key ? "active" : ""}">${esc(t(label))}</button>`).join("")}
+    </div>
+    <section class="panel" data-settings-tab="services">
       <h2>TMDB</h2>
       <p class="muted">${esc(t("Clé API ou jeton de lecture TMDB pour enrichir la progression, la bibliothèque et les contenus vus avec les jaquettes et fiches françaises. La valeur est conservée chiffrée sur le serveur."))}</p>
       <p>${config.tmdbConfigured ? esc(t("✓ Une clé TMDB est enregistrée et l’enrichissement est actif.")) : esc(t("Aucune clé TMDB enregistrée."))}</p>
@@ -41,7 +60,7 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       <p class="muted">${esc(t("Les résultats sont mis en cache pendant 7 jours."))}</p>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="general">
       <h2>${esc(t("Adresse publique"))}</h2>
       <p class="muted">${esc(t("Adresse utilisée pour générer les manifests et les liens des addons proxifiés. Indique le domaine HTTPS de ton reverse proxy, sans chemin final."))}</p>
       <form id="public-url-form" class="form">
@@ -51,7 +70,7 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       </form>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="proxy">
       <h2>${esc(t("Proxy externe"))}</h2>
       <p class="muted">${esc(t("Enregistre un ou plusieurs proxys HTTP(S) ou SOCKS accessibles depuis le serveur, puis choisis celui qu’utilisent les addons attribués au mode « Proxy externe »."))}</p>
       <div class="proxy-list">
@@ -82,7 +101,7 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       </form>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="services">
       <h2>${esc(t("Trakt et Simkl"))}</h2>
       <p class="muted">${esc(t("Configure les applications utilisées pour associer un compte de suivi à chaque profil Nuvio. Les secrets restent chiffrés côté serveur."))}</p>
       <form id="trackers-form" class="form">
@@ -98,7 +117,7 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       </form>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="general">
       <h2>${esc(t("Synchronisation de l’historique"))}</h2>
       <p class="muted">${esc(t("Le manager garde une copie locale de l’historique de chaque profil (visionnages, progression, bibliothèque, Trakt et Simkl) et la rafraîchit automatiquement, pour afficher les statistiques et l’historique instantanément."))}</p>
       <p id="history-last">${esc(lastSyncLabel(history.lastFullSync))}</p>
@@ -110,7 +129,7 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       </form>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="general">
       <h2>${esc(t("Vérification des addons"))}</h2>
       <p class="muted">${esc(t("Le manager lit régulièrement le manifest de chaque addon de la bibliothèque, depuis le serveur et à travers le proxy externe si un profil l’utilise, pour signaler ceux qui ne répondent plus."))}</p>
       <form id="addon-health-form" class="form">
@@ -120,7 +139,7 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       </form>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="notifications">
       <h2>${esc(t("Notifications Discord"))}</h2>
       <p class="muted">${esc(t("Le manager envoie ses alertes dans un salon Discord. Crée un webhook dans les paramètres du salon (Intégrations › Webhooks › Nouveau webhook), copie son URL et colle-la ici."))}</p>
       <p>${discord.configured ? `${esc(t("✓ Webhook enregistré :"))} <strong>${esc(discord.name)}</strong>` : esc(t("Aucun webhook enregistré."))}</p>
@@ -141,7 +160,7 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
     </section>
 
     ${(config.accounts || []).length ? `
-    <section class="panel">
+    <section class="panel" data-settings-tab="access">
       <h2>${esc(t("Administrateurs"))}</h2>
       <p class="muted">${esc(t("Un compte Nuvio promu administrateur obtient un accès complet au dashboard, sans aucune restriction. Il perd ces droits dès qu’il est retiré. Le compte local reste indépendant : il ne peut être modifié que depuis la connexion locale."))}</p>
       <div class="admin-accounts">
@@ -149,21 +168,21 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       </div>
     </section>` : ""}
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="access">
       <h2>${esc(t("Page de connexion"))}</h2>
       <p class="muted">${esc(t("À n’activer que derrière une authentification externe (OAuth) : sans page de connexion, toute personne pouvant atteindre le dashboard y dispose d’un accès administrateur complet."))}</p>
       <label class="check-label"><input type="checkbox" id="login-disabled" ${config.loginDisabled ? "checked" : ""} ${config.loginManaged ? "disabled" : ""}>${esc(t("Désactiver la page de connexion"))}</label>
       ${config.loginManaged ? `<p class="muted">${esc(t("Géré par l’environnement (DISABLE_LOGIN)."))}</p>` : ""}
     </section>
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="access">
       <h2>${esc(t("Authentification externe"))}</h2>
       <p class="muted">${esc(t("Faire confiance à l’identité injectée par un proxy d’auth en amont (oauth2-proxy, Authelia…). À n’activer que si l’application n’est accessible qu’à travers ce proxy contrôlant chaque connexion : sinon un client pourrait forger son identité."))}</p>
       <label class="check-label"><input type="checkbox" id="auth-proxy" ${config.authProxy ? "checked" : ""} ${config.authProxyManaged ? "disabled" : ""}>${esc(t("Faire confiance au proxy d’authentification"))}</label>
       ${config.authProxyManaged ? `<p class="muted">${esc(t("Géré par l’environnement (AUTH_PROXY)."))}</p>` : ""}
     </section>
 
-    <section class="panel">
+    <section class="panel" data-settings-tab="access">
       <h2>${esc(t("Administrateur du panel (compte local)"))}</h2>
       ${config.adminManaged
         ? `<p class="muted">${esc(t("L’administrateur est géré par l’environnement (compose) et ne peut pas être modifié ici."))}</p>`
@@ -181,6 +200,24 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
     </section>`;
 
   const $ = (selector) => container.querySelector(selector);
+  const showTab = (key) => {
+    settingsTab = key;
+    try {
+      sessionStorage.setItem("nm-settings-tab", key);
+    } catch {}
+    container.querySelectorAll("[data-settings-page]").forEach((button) => {
+      const active = button.dataset.settingsPage === key;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    container.querySelectorAll("[data-settings-tab]").forEach((section) => {
+      section.hidden = section.dataset.settingsTab !== key;
+    });
+  };
+  container.querySelectorAll("[data-settings-page]").forEach((button) => {
+    button.onclick = () => showTab(button.dataset.settingsPage);
+  });
+  showTab(settingsTab);
   $("#tmdb-form").onsubmit = (event) => {
     event.preventDefault();
     run(async () => {

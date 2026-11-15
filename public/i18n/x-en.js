@@ -1608,4 +1608,8 @@ export default {
   "Alerte activée.": "Alert enabled.",
   "Alerte désactivée.": "Alert disabled.",
   "Heure du résumé enregistrée.": "Summary time saved.",
+  "Catégories de paramètres": "Settings categories",
+  "Services": "Services",
+  "Proxy": "Proxy",
+  "Accès et sécurité": "Access and security",
 };

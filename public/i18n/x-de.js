@@ -1593,4 +1593,8 @@ export default {
   "Alerte activée.": "Meldung aktiviert.",
   "Alerte désactivée.": "Meldung deaktiviert.",
   "Heure du résumé enregistrée.": "Uhrzeit der Zusammenfassung gespeichert.",
+  "Catégories de paramètres": "Einstellungskategorien",
+  "Services": "Dienste",
+  "Proxy": "Proxy",
+  "Accès et sécurité": "Zugang und Sicherheit",
 };

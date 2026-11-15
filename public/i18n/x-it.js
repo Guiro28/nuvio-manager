@@ -1593,4 +1593,8 @@ export default {
   "Alerte activée.": "Avviso attivato.",
   "Alerte désactivée.": "Avviso disattivato.",
   "Heure du résumé enregistrée.": "Ora del riepilogo salvata.",
+  "Catégories de paramètres": "Categorie di impostazioni",
+  "Services": "Servizi",
+  "Proxy": "Proxy",
+  "Accès et sécurité": "Accesso e sicurezza",
 };

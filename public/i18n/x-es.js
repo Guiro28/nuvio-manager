@@ -1593,4 +1593,8 @@ export default {
   "Alerte activée.": "Alerta activada.",
   "Alerte désactivée.": "Alerta desactivada.",
   "Heure du résumé enregistrée.": "Hora del resumen guardada.",
+  "Catégories de paramètres": "Categorías de ajustes",
+  "Services": "Servicios",
+  "Proxy": "Proxy",
+  "Accès et sécurité": "Acceso y seguridad",
 };

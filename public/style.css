@@ -2512,3 +2512,7 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .notify-group legend {padding:0 6px;font-weight:600;}
 .notify-hour {display:grid;gap:6px;margin-top:4px;}
 .notify-group p {margin:0;}
+
+/* Settings page tabs */
+.settings-page-tabs {margin:0 0 18px;}
+.panel[data-settings-tab][hidden] {display:none;}
