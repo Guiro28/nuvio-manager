@@ -296,6 +296,13 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.match(unreadable.data.error, /Impossible de lire le manifest de la nouvelle URL/);
   assert.equal(JSON.stringify(addonRows), before);
   assert.equal((await call("state")).data.library.find((item) => item.id === lib.data.id).url, lib.data.url);
+  // Health: an explicit check reports an unreachable manifest right away.
+  assert.equal((await call("library/health/check", { id: "unknown" })).status, 404);
+  const checked = await call("library/health/check", { id: lib.data.id });
+  assert.equal(checked.status, 200);
+  assert.equal(checked.data.items[lib.data.id].status, "down");
+  assert.equal(checked.data.items[lib.data.id].paths.direct.ok, false);
+  assert.equal((await call("library/health")).data.items[lib.data.id].status, "down");
   addonRows[1] = []; // reset so later assertions see a clean profile
   addonRows[2] = [];
   const plan = await call("preview", {
@@ -382,6 +389,22 @@ test("appairage, catalogue, aperçu, copie protégée, sauvegarde et erreurs par
   assert.equal((await call('settings')).data.username, 'admin');
   assert.equal((await call('settings/tmdb',{key:'tmdb-test-secret'})).status,200);
   assert.equal((await call('settings/trackers',{traktClientId:'trakt-client',traktClientSecret:'trakt-secret',simklClientId:'simkl-client'})).status,200);
+  assert.equal((await call('settings')).data.addonHealth.intervalMinutes,15);
+  assert.equal((await call('settings/addon-health',{intervalMinutes:3})).status,400);
+  assert.equal((await call('settings/addon-health',{intervalMinutes:20})).status,200);
+  assert.equal((await call('settings')).data.addonHealth.intervalMinutes,20);
+  assert.equal((await call('library/health')).data.intervalMinutes,20);
+  // Discord: only Discord webhook URLs; alerts can be switched without a webhook.
+  assert.equal((await call('settings')).data.discord.configured,false);
+  assert.equal((await call('settings/discord',{url:'https://evil.example/api/webhooks/1/2'})).status,400);
+  assert.equal((await call('settings/discord',{summaryHour:25})).status,400);
+  assert.equal((await call('settings/discord/test',{})).status,400);
+  const discordSaved=await call('settings/discord',{events:{relay:false},summaryHour:8,timeZone:'Europe/Paris'});
+  assert.equal(discordSaved.status,200);
+  assert.equal(discordSaved.data.events.relay,false);
+  assert.equal(discordSaved.data.events.down,true);
+  assert.equal((await call('settings')).data.discord.summaryHour,8);
+  assert.equal((await call('settings')).data.discord.timeZone,'Europe/Paris');
   assert.equal((await call('settings/proxy',{url:'ftp://proxy.invalid:21'})).status,400);
   assert.equal((await call('settings/proxy',{url:'socks5://proxy-user:proxy-secret@proxy.example:1080'})).status,200);
   const panelSettings = await call('settings');

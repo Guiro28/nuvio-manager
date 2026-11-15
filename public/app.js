@@ -642,7 +642,7 @@ async function renderDevices() {
   const paint = (data) => {
     const devices = data.devices || [];
     const fact = (label, value, extra = "") => (value ? `<div${extra}><dt>${esc(t(label))}</dt><dd>${value}</dd></div>` : "");
-    const when = (value) => (value ? `${esc(backupAgo(value))} <span class="muted">· ${esc(backupDate(value))}</span>` : "");
+    const when = (value) => (value ? `${esc(timeAgo(value))} <span class="muted">· ${esc(backupDate(value))}</span>` : "");
     host.innerHTML =
       `<div class="dev-head"><div><h3>${esc(t("Appareils du compte"))}</h3><p class="muted">${esc(t("Applications Nuvio connectées à ce compte, tous profils confondus. La dernière activité est mise à jour à l’ouverture de l’app (au plus toutes les 15 minutes) et environ toutes les heures pendant l’utilisation."))}</p></div><button id="dev-reload">${esc(t("Actualiser"))}</button></div>` +
       (!data.available
@@ -1292,17 +1292,17 @@ async function renderLibrary() {
     users.length
       ? `<button type="button" class="lib-usage" data-usage="${esc(a.id)}" title="${esc(t("Gérer les profils"))}">${stack(users)}<span class="badge neutral lib-count">${esc(t("{n} profils", { n: users.length }))}</span></button>`
       : `<span class="badge neutral lib-count lib-count-empty">${esc(t("Aucun profil"))}</span>`;
-  const card = (a, users) =>
-    `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="lib-row-right">${usageControl(a, users)}<div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-assign-many="${a.id}">${esc(t("À plusieurs profils"))}</button>${a.configurable ? `<button class="lib-configure" data-configure="${a.id}" title="${esc(t("Ouvrir la page de configuration de l’addon"))}" aria-label="${esc(t("Configurer"))}">${COG_ICON}</button>` : ""}<button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></div></article>`;
+  const card = (a, users, h) =>
+    `<article class="addon library-addon"><div class="addon-top"><div class="library-addon-identity">${addonLogo(a)}<div class="library-addon-copy"><div class="addon-name">${esc(a.name)}${healthChip(a, h)}</div><p class="url" title="${esc(a.url)}">${esc(a.url)}</p></div></div><div class="lib-row-right">${usageControl(a, users)}<div class="actions"><button data-edit="${a.id}">${esc(t("Modifier"))}</button><button data-assign="${a.id}" class="primary">${esc(t("Attribuer à un profil"))}</button><button data-assign-many="${a.id}">${esc(t("À plusieurs profils"))}</button>${a.configurable ? `<button class="lib-configure" data-configure="${a.id}" title="${esc(t("Ouvrir la page de configuration de l’addon"))}" aria-label="${esc(t("Configurer"))}">${COG_ICON}</button>` : ""}<button data-delete="${a.id}" class="quiet">${esc(t("Retirer"))}</button></div></div></div></article>`;
 
   $("#content").innerHTML =
     heading(
       t("nav.library"),
       t("Chaque addon montre les profils qui l’utilisent. Changez le mode de proxy profil par profil."),
-      `<div class="header-actions">${state.library.length ? btn(t("Attribuer plusieurs addons"), "bulk-assign") : ""}${btn(t("＋ Ajouter un addon"), "new-addon", "primary")}</div>`,
+      `<div class="header-actions">${state.library.length ? btn(t("Vérifier les addons"), "health-check-all") + btn(t("Attribuer plusieurs addons"), "bulk-assign") : ""}${btn(t("＋ Ajouter un addon"), "new-addon", "primary")}</div>`,
     ) +
     (state.library.length
-      ? `<div class="list" id="library-list"><p class="muted lib-loading">${esc(t("Chargement…"))}</p></div>`
+      ? `<div id="lib-health-summary"></div><div class="list" id="library-list"><p class="muted lib-loading">${esc(t("Chargement…"))}</p></div>`
       : `<div class="empty"><div class="empty-symbol">⊞</div><h2>${esc(t("Votre catalogue commence ici."))}</h2><p class="muted">${esc(t("Ajoutez l’URL du manifest d’un addon. Son attribution aux profils reste manuelle."))}</p></div>`);
   $("#new-addon").onclick = () => addonForm();
   if ($("#bulk-assign")) $("#bulk-assign").onclick = () => run(() => bulkAssign());
@@ -1319,13 +1319,30 @@ async function renderLibrary() {
 
   if (!state.library.length) return;
 
-  let usage = {};
-  try {
-    usage = (await api("library/usage")).usage || {};
-  } catch {}
+  const [usageResult, health] = await Promise.all([
+    api("library/usage").catch(() => ({})),
+    api("library/health").catch(() => null),
+  ]);
+  const usage = usageResult.usage || {};
+  const healthOf = (id) => health?.items?.[id] || null;
   const list = $("#library-list");
   if (!list) return;
-  list.innerHTML = state.library.map((a) => card(a, usage[a.id] || [])).join("");
+  list.innerHTML = state.library.map((a) => card(a, usage[a.id] || [], healthOf(a.id))).join("");
+  $("#lib-health-summary").innerHTML = healthSummary(health);
+  $$("[data-health]").forEach((b) => {
+    b.onclick = () => healthDialog(state.library.find((a) => a.id === b.dataset.health), healthOf(b.dataset.health), usage[b.dataset.health] || []);
+  });
+  $("#health-check-all").onclick = async () => {
+    const button = $("#health-check-all");
+    button.disabled = true;
+    button.textContent = t("Vérification…");
+    try {
+      await api("library/health/check", {});
+    } catch (error) {
+      toast(error.message);
+    }
+    if (page === "library") renderLibrary();
+  };
   $$("#library-list .addon-logo img, #library-list .profile-avatar").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
 
   $$("[data-usage]").forEach((b) => {
@@ -1381,6 +1398,113 @@ function removeLibraryAddon(addon, users) {
       if (page === "library") renderLibrary(); // usage may have changed (partial removal)
     } finally {
       document.body.classList.remove("busy");
+    }
+  };
+}
+// Addon health (server/addon-health.js). On the card: a short label — online,
+// down, reachable by one path only, recently updated (a dot alone until the
+// first check). The window details each path, the
+// availability, the version and the profiles concerned.
+const HEALTH_RECENT_MS = 7 * 864e5;
+const HEALTH_PATHS = { direct: "Depuis le serveur", warp: "Via le proxy externe" };
+const shortDuration = (ms) => {
+  const minutes = Math.max(1, Math.round(ms / 6e4));
+  if (minutes < 60) return t("{n} min", { n: minutes });
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? t("{n} h", { n: hours }) : t("{n} j", { n: Math.round(hours / 24) });
+};
+// Server error labels are French source strings; the HTTP one carries a code.
+const healthError = (error) => {
+  const http = /^Erreur HTTP (\d+)$/.exec(error || "");
+  return http ? t("Erreur HTTP {n}", { n: http[1] }) : t(error || "Erreur");
+};
+function healthState(h) {
+  if (!h || h.status === "unknown") return { tone: "unknown", text: "", title: t("Pas encore vérifié") };
+  const failed = Object.entries(h.paths || {}).filter(([, p]) => !p.ok).map(([mode]) => mode);
+  const firstError = Object.values(h.paths || {}).find((p) => !p.ok)?.error || "";
+  if (h.status === "down")
+    return { tone: "down", text: t("Injoignable depuis {d}", { d: shortDuration(Date.now() - h.failingSince) }), title: healthError(firstError) };
+  if (h.status === "partial")
+    return {
+      tone: "partial",
+      text: failed.includes("warp") ? t("Injoignable via le proxy externe") : t("Injoignable depuis le serveur"),
+      title: healthError(firstError),
+    };
+  const ms = Object.values(h.paths || {}).find((p) => p.ok)?.ms;
+  const title = t("En ligne · {ms} ms · vérifié {ago}", { ms: ms ?? "?", ago: timeAgo(h.checkedAt) });
+  if (h.versionChangedAt && Date.now() - h.versionChangedAt < HEALTH_RECENT_MS)
+    return { tone: "updated", text: h.version ? t("Mis à jour · v{version}", { version: h.version }) : t("Mis à jour"), title };
+  if (h.contentChangedAt && Date.now() - h.contentChangedAt < HEALTH_RECENT_MS)
+    return { tone: "updated", text: t("Manifest modifié"), title };
+  return { tone: "ok", text: t("En ligne"), title };
+}
+function healthChip(addon, h) {
+  const look = healthState(h);
+  return `<button type="button" class="lib-health tone-${look.tone}${look.text ? "" : " dot-only"}" data-health="${esc(addon.id)}" title="${esc(look.title || look.text)}" aria-label="${esc(t("État de l’addon"))}"><span class="lib-health-dot"></span>${look.text ? `<span>${esc(look.text)}</span>` : ""}</button>`;
+}
+function healthSummary(health) {
+  if (!health) return "";
+  const items = state.library.map((a) => [a, health.items?.[a.id]]);
+  const failing = items.filter(([, h]) => h && (h.status === "down" || h.status === "partial"));
+  if (failing.length)
+    return `<div class="lib-health-summary tone-down"><strong>${esc(t("{n} addon(s) à surveiller", { n: failing.length }))}</strong> · ${failing.map(([a]) => esc(a.name)).join(", ")}</div>`;
+  if (!health.lastRunAt) return `<p class="muted lib-health-line">${esc(t("Première vérification des addons en cours…"))}</p>`;
+  const pending = items.filter(([, h]) => !h || h.status === "unknown").length;
+  if (pending) return `<p class="muted lib-health-line">${esc(t("{n} addon(s) en cours de vérification · dernière vérification {ago}.", { n: pending, ago: timeAgo(health.lastRunAt) }))}</p>`;
+  return `<p class="muted lib-health-line">${esc(t("Tous les addons répondent · vérifiés {ago}, toutes les {n} min.", { ago: timeAgo(health.lastRunAt), n: health.intervalMinutes }))}</p>`;
+}
+function healthDialog(addon, h, users) {
+  if (!addon) return;
+  const look = healthState(h);
+  const MODE_NAMES = { none: t("Sans proxy"), direct: t("Proxy interne"), warp: t("Proxy externe") };
+  const statusText = {
+    unknown: t("Pas encore vérifié"),
+    ok: t("En ligne"),
+    updated: t("En ligne"),
+    partial: look.text,
+    down: look.text,
+  }[look.tone];
+  const paths = Object.entries(h?.paths || {})
+    .map(([mode, p]) => `<div class="lib-health-path"><span>${esc(t(HEALTH_PATHS[mode] || mode))}</span><span class="${p.ok ? "path-ok" : "path-error"}">${p.ok ? `✓ ${esc(t("Répond en {ms} ms", { ms: p.ms }))}` : `✕ ${esc(healthError(p.error))}`}</span></div>`)
+    .join("");
+  const facts = [];
+  if (h?.checkedAt) facts.push([t("Dernière vérification"), timeAgo(h.checkedAt)]);
+  if (h && h.status !== "ok" && h.status !== "unknown") facts.push([t("Dernière réponse correcte"), h.lastOkAt ? timeAgo(h.lastOkAt) : t("Jamais")]);
+  if (h?.availability != null) facts.push([t("Disponibilité sur 7 jours"), `${h.availability.toLocaleString(getLang())} %`]);
+  if (h?.version)
+    facts.push([
+      t("Version"),
+      h.previousVersion && h.versionChangedAt
+        ? t("{version} (avant : {previous}, changée {ago})", { version: h.version, previous: h.previousVersion, ago: timeAgo(h.versionChangedAt) })
+        : h.version,
+    ]);
+  if (h?.contentChangedAt) facts.push([t("Manifest modifié"), timeAgo(h.contentChangedAt)]);
+  const failing = h && (h.status === "down" || h.status === "partial");
+  openDialog(
+    `<h2>${esc(t("État de « {name} »", { name: addon.name }))}</h2>` +
+      `<p class="lib-health-status tone-${look.tone}"><span class="lib-health-dot"></span>${esc(statusText)}</p>` +
+      (paths ? `<div class="lib-health-paths">${paths}</div>` : "") +
+      (facts.length ? `<dl class="lib-health-facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : "") +
+      `<p class="hint">${esc(t("« Depuis le serveur » est le chemin des profils en proxy interne. Les profils sans proxy contactent l’addon depuis leur propre connexion : le résultat peut différer pour eux."))}</p>` +
+      `<h3>${esc(failing ? t("Profils concernés ({n})", { n: users.length }) : t("Profils qui l’utilisent ({n})", { n: users.length }))}</h3>` +
+      (users.length
+        ? `<div class="lib-usage-list">${users.map((u) => `<div class="lib-profile">${profileAvatar(u.identity)}<div class="lib-profile-meta"><span class="lib-profile-name">${esc(u.identity.name || u.profileName)}</span><span class="muted">${esc(u.accountName)} · ${esc(MODE_NAMES[u.mode] || u.mode)}</span></div></div>`).join("")}</div>`
+        : `<p class="muted">${esc(t("Aucun profil n’utilise cet addon pour le moment."))}</p>`) +
+      `<div class="dialog-actions"><button data-close>${esc(t("Fermer"))}</button><button id="health-check" class="primary">${esc(t("Vérifier maintenant"))}</button></div>`,
+  );
+  $$("#dialog .profile-avatar").forEach((image) => image.addEventListener("error", () => image.remove(), { once: true }));
+  $("#health-check").onclick = async () => {
+    const button = $("#health-check");
+    button.disabled = true;
+    button.textContent = t("Vérification…");
+    try {
+      const snapshot = await api("library/health/check", { id: addon.id });
+      healthDialog(addon, snapshot.items?.[addon.id] || null, users);
+      if (page === "library") renderLibrary();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = t("Vérifier maintenant");
+      toast(error.message);
     }
   };
 }
@@ -1767,7 +1891,7 @@ const BACKUP_PARTS = [
   ["collections", "Collections"],
 ];
 const backupDate = (at) => new Date(at).toLocaleString(getLang(), { dateStyle: "medium", timeStyle: "short" });
-const backupAgo = (at) => {
+const timeAgo = (at) => {
   const elapsed = new Date(at).getTime() - Date.now();
   const units = [["day", 864e5], ["hour", 36e5], ["minute", 6e4]];
   const [unit, size] = units.find(([, ms]) => Math.abs(elapsed) >= ms) || ["minute", 6e4];
@@ -1803,7 +1927,7 @@ async function renderBackups() {
           .map((a) => {
             const list = accountBackups(a.id);
             const open = openBackupAccounts.has(a.id);
-            const meta = list[0] ? t("Dernière sauvegarde {ago}", { ago: backupAgo(list[0].at) }) : t("Aucune sauvegarde");
+            const meta = list[0] ? t("Dernière sauvegarde {ago}", { ago: timeAgo(list[0].at) }) : t("Aucune sauvegarde");
             return `<section class="panel bk-account${open ? " open" : ""}"><div class="bk-account-head"><button type="button" class="bk-account-toggle" data-bk-toggle="${esc(a.id)}" aria-expanded="${open}"><span class="bk-chevron" aria-hidden="true">›</span><strong>${esc(a.name || a.email)}</strong>${accountTypeBadge(a.provider)}<span class="muted bk-account-meta">${esc(meta)}</span></button><div class="actions"><button data-bk-history="${esc(a.id)}">${esc(t("Historique ({n})", { n: list.length }))}</button><button data-bk-restore-account="${esc(a.id)}" ${list.length ? "" : "disabled"}>${esc(t("Restaurer le compte…"))}</button><button class="primary" data-bk-create="${esc(a.id)}">${esc(t("Sauvegarder le compte"))}</button></div></div><div class="bk-profiles" data-bk-profiles="${esc(a.id)}" ${open ? "" : "hidden"}></div></section>`;
           })
           .join("") +
@@ -1816,7 +1940,7 @@ async function renderBackups() {
         .map((p) => {
           const list = profileBackups(a.id, p.profile_index);
           const info = list[0]
-            ? t("Dernière sauvegarde {ago} · {n} disponible(s)", { ago: backupAgo(list[0].at), n: list.length })
+            ? t("Dernière sauvegarde {ago} · {n} disponible(s)", { ago: timeAgo(list[0].at), n: list.length })
             : t("Aucune sauvegarde");
           return `<div class="bk-profile">${profileAvatar(p)}<div class="bk-profile-info"><strong>${esc(p.name)}</strong><span class="muted">${esc(info)}</span></div><button data-bk-restore-profile="${esc(a.id)}" data-profile="${p.profile_index}" data-name="${esc(p.name)}" ${list.length ? "" : "disabled"}>${esc(t("Restaurer…"))}</button></div>`;
         })

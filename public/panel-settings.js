@@ -5,10 +5,28 @@ const esc = (value) => String(value ?? "").replace(
   (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character],
 );
 
+// Discord notifications, grouped as shown in the settings.
+const NOTIFY_GROUPS = [
+  ["Addons", [["down", "Addon injoignable"], ["recovered", "Addon de nouveau en ligne"], ["updated", "Addon mis à jour"], ["changed", "Manifest d’un addon modifié"]]],
+  ["Proxy et relais", [["proxy", "Proxy externe injoignable ou rétabli"], ["relay", "Plusieurs lectures en échec au relais"]]],
+  ["Comptes", [["device", "Nouvel appareil connecté (comptes Nuvio)"], ["reconnect", "Compte à reconnecter"], ["sync", "Synchronisation de l’historique en échec"]]],
+  ["Sauvegardes et sécurité", [["backup", "Sauvegarde automatique échouée"], ["login", "Connexions échouées répétées au manager"]]],
+  ["Système", [["started", "Démarrage ou mise à jour du manager"], ["summary", "Résumé quotidien"]]],
+];
+const browserTimeZone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+};
+
 export async function renderPanelSettings(container, { api, run, toast, onSaved }) {
   const config = await api("settings");
   const proxies = config.proxies || [];
   const history = config.history || { enabled: true, intervalMinutes: 30, lastFullSync: 0 };
+  const addonHealth = config.addonHealth || { intervalMinutes: 15 };
+  const discord = config.discord || { configured: false, events: {}, summaryHour: 20, timeZone: "" };
   const lastSyncLabel = (ms) =>
     ms ? t("Dernière synchronisation : {date}", { date: new Date(ms).toLocaleString() }) : t("Jamais synchronisé.");
   container.innerHTML = `
@@ -90,6 +108,36 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
         <div class="actions"><button class="primary">${esc(t("Enregistrer"))}</button><button type="button" id="history-sync">${esc(t("Synchroniser maintenant"))}</button></div>
         <p id="history-result" class="muted"></p>
       </form>
+    </section>
+
+    <section class="panel">
+      <h2>${esc(t("Vérification des addons"))}</h2>
+      <p class="muted">${esc(t("Le manager lit régulièrement le manifest de chaque addon de la bibliothèque, depuis le serveur et à travers le proxy externe si un profil l’utilise, pour signaler ceux qui ne répondent plus."))}</p>
+      <form id="addon-health-form" class="form">
+        <label>${esc(t("Intervalle (minutes)"))}<input name="intervalMinutes" type="number" min="5" max="1440" step="1" value="${esc(addonHealth.intervalMinutes)}" required></label>
+        <div class="actions"><button class="primary">${esc(t("Enregistrer"))}</button></div>
+        <p id="addon-health-result" class="muted"></p>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>${esc(t("Notifications Discord"))}</h2>
+      <p class="muted">${esc(t("Le manager envoie ses alertes dans un salon Discord. Crée un webhook dans les paramètres du salon (Intégrations › Webhooks › Nouveau webhook), copie son URL et colle-la ici."))}</p>
+      <p>${discord.configured ? `${esc(t("✓ Webhook enregistré :"))} <strong>${esc(discord.name)}</strong>` : esc(t("Aucun webhook enregistré."))}</p>
+      <form id="discord-form" class="form">
+        <label>${esc(discord.configured ? t("Remplacer par un autre webhook") : t("URL du webhook"))}<input name="webhook" type="password" autocomplete="off" spellcheck="false" maxlength="512" placeholder="https://discord.com/api/webhooks/…" ${discord.configured ? "" : "required"}></label>
+        <div class="actions"><button class="primary">${esc(t("Enregistrer le webhook"))}</button>${discord.configured ? `<button type="button" id="discord-test">${esc(t("Envoyer un test"))}</button><button type="button" id="discord-remove" class="quiet">${esc(t("Supprimer le webhook"))}</button>` : ""}</div>
+      </form>
+      <h3>${esc(t("Alertes envoyées"))}</h3>
+      <div class="notify-groups">
+        ${NOTIFY_GROUPS.map(([group, events]) => `
+        <fieldset class="notify-group">
+          <legend>${esc(t(group))}</legend>
+          ${events.map(([key, label]) => `<label class="check-label"><input type="checkbox" data-notify="${key}" ${discord.events?.[key] !== false ? "checked" : ""}>${esc(t(label))}</label>`).join("")}
+          ${group === "Système" ? `<label class="notify-hour">${esc(t("Heure du résumé"))}<select id="discord-hour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === discord.summaryHour ? "selected" : ""}>${esc(t("{h} h", { h }))}</option>`).join("")}</select></label><p class="muted">${esc(t("Fuseau horaire : {zone}", { zone: discord.timeZone || browserTimeZone() || "UTC" }))}</p>` : ""}
+        </fieldset>`).join("")}
+      </div>
+      ${discord.configured ? `<div class="actions"><button type="button" id="discord-summary">${esc(t("Envoyer le résumé maintenant"))}</button></div>` : ""}
     </section>
 
     ${(config.accounts || []).length ? `
@@ -223,6 +271,59 @@ export async function renderPanelSettings(container, { api, run, toast, onSaved 
       });
       toast(t("Réglages de synchronisation enregistrés."));
       $("#history-result").textContent = t("Intervalle : {n} min", { n: result.intervalMinutes });
+    });
+  };
+  $("#discord-form").onsubmit = (event) => {
+    event.preventDefault();
+    run(async () => {
+      const url = String(new FormData(event.target).get("webhook") || "").trim();
+      if (!url) throw Error(t("Colle l’URL du webhook Discord."));
+      await api("settings/discord", { url, timeZone: discord.timeZone || browserTimeZone() });
+      toast(t("Webhook Discord enregistré."));
+      await onSaved();
+    });
+  };
+  if ($("#discord-test"))
+    $("#discord-test").onclick = () => run(async () => {
+      await api("settings/discord/test", {});
+      toast(t("Notification de test envoyée sur Discord."));
+    });
+  if ($("#discord-summary"))
+    $("#discord-summary").onclick = () => run(async () => {
+      await api("settings/discord/summary", {});
+      toast(t("Résumé envoyé sur Discord."));
+    });
+  if ($("#discord-remove"))
+    $("#discord-remove").onclick = () => {
+      if (!confirm(t("Supprimer le webhook Discord ? Plus aucune notification ne sera envoyée."))) return;
+      run(async () => {
+        await api("settings/discord/remove", {});
+        toast(t("Webhook Discord supprimé."));
+        await onSaved();
+      });
+    };
+  const notifyEvents = () => Object.fromEntries([...container.querySelectorAll("[data-notify]")].map((box) => [box.dataset.notify, box.checked]));
+  container.querySelectorAll("[data-notify]").forEach((box) => {
+    box.onchange = () => run(async () => {
+      try {
+        await api("settings/discord", { events: notifyEvents() });
+        toast(box.checked ? t("Alerte activée.") : t("Alerte désactivée."));
+      } catch (error) {
+        box.checked = !box.checked;
+        throw error;
+      }
+    });
+  });
+  $("#discord-hour").onchange = (event) => run(async () => {
+    await api("settings/discord", { summaryHour: Number(event.target.value), timeZone: browserTimeZone() });
+    toast(t("Heure du résumé enregistrée."));
+  });
+  $("#addon-health-form").onsubmit = (event) => {
+    event.preventDefault();
+    run(async () => {
+      const result = await api("settings/addon-health", { intervalMinutes: Number(new FormData(event.target).get("intervalMinutes")) });
+      toast(t("Intervalle de vérification des addons enregistré."));
+      $("#addon-health-result").textContent = t("Intervalle : {n} min", { n: result.intervalMinutes });
     });
   };
   $("#history-sync").onclick = () => run(async () => {

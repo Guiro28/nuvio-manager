@@ -85,7 +85,7 @@ const passthroughHeaders = [
   "etag",
 ];
 
-export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl, getProxyUrl, getProfileLabel }) {
+export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl, getProxyUrl, getProfileLabel, onStreamResult }) {
   const configuredOrigin = () => getOrigin ? getOrigin() : origin;
   const configuredProxy = () => getProxyUrl
     ? getProxyUrl()
@@ -397,6 +397,56 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     };
   }
 
+  // Health check of an addon manifest along one path (direct = from the server,
+  // warp = through the external proxy). Never throws; the error is a readable
+  // label, never the transport message (it could contain proxy credentials).
+  async function probeManifest(manifestUrl, mode) {
+    const started = Date.now();
+    const fail = (error, status = 0) => ({ ok: false, ms: Date.now() - started, status, error });
+    let upstream;
+    try {
+      upstream = upstreamFor(mode, configuredProxy());
+    } catch {
+      return fail("Aucun proxy externe n’est configuré");
+    }
+    let res;
+    try {
+      ({ res } = await request(manifestUrl, { upstream, headers: { accept: "application/json" }, timeout: 15000 }));
+    } catch (error) {
+      const code = error.code || "";
+      return fail(
+        error.message === "Timeout" ? "Délai dépassé (15 s)"
+          : code === "ENOTFOUND" || code === "EAI_AGAIN" ? "Nom de domaine introuvable"
+          : code === "ECONNREFUSED" ? "Connexion refusée"
+          : code === "ECONNRESET" || code === "EPIPE" ? "Connexion interrompue"
+          : /CERT|SSL|TLS/i.test(code) ? "Certificat TLS invalide"
+          : mode === "warp" ? "Proxy externe injoignable ou refusé"
+          : "Erreur réseau",
+      );
+    }
+    if (res.statusCode !== 200) {
+      res.resume();
+      return fail(`Erreur HTTP ${res.statusCode}`, res.statusCode);
+    }
+    try {
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of res) {
+        size += chunk.length;
+        if (size > 1024 * 1024) {
+          res.destroy();
+          return fail("Manifest trop volumineux", 200);
+        }
+        chunks.push(chunk);
+      }
+      const manifest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      if (!manifest?.id) return fail("Manifest sans identifiant", 200);
+      return { ok: true, ms: Date.now() - started, status: 200, manifest };
+    } catch {
+      return fail("Manifest JSON invalide", 200);
+    }
+  }
+
   // Register a relay entry. With {accountId, profileId} context, mint/reuse a
   // per-assignment grant (unique revocable token). Without context, fall back to
   // the legacy shared-by-manifest addon (kept for back-compat).
@@ -605,6 +655,10 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
           media.socket?.setTimeout?.(0);
         }
         res.statusCode = media.statusCode || 502;
+        // Outcome of a stream open, for the "repeated failures" alert (416 is a
+        // player seeking past the end, not a failure).
+        if (req.method === "GET")
+          onStreamResult?.({ ok: res.statusCode < 400 || res.statusCode === 416, token: rawToken, grant, reason: `Erreur HTTP ${res.statusCode}` });
         for (const name of passthroughHeaders)
           if (media.headers[name]) res.setHeader(name, media.headers[name]);
         res.setHeader("Accept-Ranges", media.headers["accept-ranges"] || "bytes");
@@ -692,6 +746,14 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
       return true;
     } catch (error) {
       log[error.expired ? "debug" : "warn"]("proxy", "relais échoué", { mode, expired: Boolean(error.expired), error: error.message });
+      if (match[2] === "play" && !error.expired && req.method === "GET") {
+        const token = url.searchParams.get("t");
+        let grant = null;
+        try {
+          grant = getGrant(decodeToken(token).addonId);
+        } catch {}
+        onStreamResult?.({ ok: false, token, grant, reason: error.message === "Timeout" ? "Délai dépassé" : "Source injoignable" });
+      }
       if (!res.headersSent) {
         const statusCode = error.expired ? 410 : 502;
         res.writeHead(statusCode, { "Content-Type": "text/plain; charset=utf-8" });
@@ -703,5 +765,5 @@ export function createIntegratedProxy({ state, save, origin, getOrigin, warpUrl,
     }
   }
 
-  return { handle, register, status, test, metrics, openEvents, liveSessions, describe, resolveLogo, revokeAccount, reconcile };
+  return { handle, register, status, test, probeManifest, metrics, openEvents, liveSessions, describe, resolveLogo, revokeAccount, reconcile };
 }

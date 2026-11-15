@@ -78,6 +78,7 @@ export function createHistoryStore({
   getIntervalMinutes,
   isEnabled,
   onSync, // optional: called (non-blocking) after each successful full sync
+  onReport, // optional: ({ failures: [{ key, label, error, accountId }] }) after every run
   concurrency = 6,
   log = console,
 }) {
@@ -193,6 +194,7 @@ export function createHistoryStore({
     log.info?.(`synchronisation démarrée`, { heavy: Boolean(heavy), accounts: accounts.length });
     const tasks = [];
     let failures = 0;
+    const failed = []; // { key, label, error, accountId } for onReport
     const enumerated = new Set(); // accounts whose profile list we could read
     const existing = new Set(); // refs that still exist upstream (enumerated)
     for (const account of accounts) {
@@ -206,6 +208,7 @@ export function createHistoryStore({
         }
       } catch (error) {
         failures++;
+        failed.push({ key: account.id, label: account.name || account.email || account.id, error: error.message, accountId: account.id });
         log.error?.(`énumération des profils échouée`, { account: account.email || account.id, error: error.message });
       }
     }
@@ -218,6 +221,7 @@ export function createHistoryStore({
       } catch (error) {
         // Keep the last good data; only record the error.
         failures++;
+        failed.push({ key: ref, label: `${account.name || account.email} · ${identity.name || `Profil ${identity.profile_index}`}`, error: error.message, accountId: account.id });
         log.debug?.(`profil non synchronisé`, { ref, error: error.message });
         if (prev) {
           prev.lastError = error.message;
@@ -268,6 +272,7 @@ export function createHistoryStore({
     // instantly. Non-blocking: never let it hold up or fail the sync. Only after a
     // heavy run, since light runs leave the history untouched.
     if (heavy && onSync) Promise.resolve(onSync(store)).catch((error) => log.error?.(`pré-chauffage TMDB échoué`, { error: error.message }));
+    if (onReport) Promise.resolve().then(() => onReport({ failures: failed })).catch((error) => log.error?.(`rapport de synchronisation échoué`, { error: error.message }));
   }
 
   // One sync at a time; callers awaiting during a run share the in-flight one.

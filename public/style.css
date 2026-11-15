@@ -2480,3 +2480,35 @@ button.primary:hover { background:linear-gradient(115deg,#875bfd,#7245eb); }
 .lib-configure:hover svg {transform:rotate(45deg);}
 
 .cfg-steps {margin:8px 0 12px;padding-left:20px;display:grid;gap:4px;}
+
+/* Addon health (library) */
+.lib-health {display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.6;vertical-align:middle;border:1px solid transparent;background:transparent;}
+.lib-health.dot-only {padding:6px;margin-left:4px;}
+.lib-health-dot {width:8px;height:8px;border-radius:50%;flex:none;background:var(--text-muted);}
+.tone-ok .lib-health-dot, .tone-updated .lib-health-dot {background:var(--success-ink);}
+.tone-down .lib-health-dot {background:var(--error-ink);}
+.tone-partial .lib-health-dot {background:var(--warning-border);}
+.lib-health.tone-ok:not(.dot-only) {background:var(--success-bg);color:var(--success-ink);border-color:var(--success-border);}
+.lib-health.tone-down {background:var(--error-bg);color:var(--error-ink);}
+.lib-health.tone-partial {background:var(--warning-bg);color:var(--warning-ink);border-color:var(--warning-border);}
+.lib-health.tone-updated:not(.dot-only) {background:var(--info-bg);color:var(--info-ink);border-color:var(--info-border);}
+.lib-health.tone-updated:not(.dot-only) .lib-health-dot {background:var(--info-ink);}
+.lib-health-summary {margin:0 0 14px;padding:12px 16px;border-radius:10px;}
+.lib-health-summary.tone-down {background:var(--error-bg);color:var(--error-ink);}
+.lib-health-line {margin:0 0 14px;}
+.lib-health-status {display:flex;align-items:center;gap:8px;font-weight:600;margin:4px 0 12px;}
+.lib-health-status .lib-health-dot {width:10px;height:10px;}
+.lib-health-paths {display:grid;gap:6px;margin:0 0 12px;padding:10px 14px;border:1px solid var(--border);border-radius:10px;}
+.lib-health-path {display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.lib-health-path .path-ok {color:var(--success-ink);}
+.lib-health-path .path-error {color:var(--error-ink);}
+.lib-health-facts {display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin:0 0 12px;}
+.lib-health-facts dt {color:var(--text-muted);}
+.lib-health-facts dd {margin:0;}
+
+/* Discord notifications (settings) */
+.notify-groups {display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:8px 0 16px;}
+.notify-group {margin:0;padding:12px 14px;border:1px solid var(--border);border-radius:10px;display:grid;gap:8px;align-content:start;}
+.notify-group legend {padding:0 6px;font-weight:600;}
+.notify-hour {display:grid;gap:6px;margin-top:4px;}
+.notify-group p {margin:0;}

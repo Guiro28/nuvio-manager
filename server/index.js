@@ -4,6 +4,12 @@ import { activity } from "./activity.js";
 import { enrichActivity } from "./tmdb.js";
 import { collectNuvioStatistics, summarizeStatistics } from "./statistics.js";
 import { createHistoryStore } from "./history-store.js";
+import { createAddonHealth } from "./addon-health.js";
+import {
+  createDiscordNotifier, normalizeWebhookUrl, setNotifierVersion, EVENTS as DISCORD_EVENTS,
+  healthEmbed, updateEmbed, contentEmbed, proxyEmbed, relayEmbed, deviceEmbed, reconnectEmbed,
+  syncEmbed, backupEmbed, loginEmbed, startedEmbed, summaryEmbed, testEmbed,
+} from "./notifier.js";
 import { createNowPlaying } from "./now-playing.js";
 import { RESTORE_PARTS, expiredBackups, profileSlice, profilesInSnapshot } from "./backups.js";
 import { getXperienceAvatars } from "./xperience.js";
@@ -276,6 +282,7 @@ const addonProxy = createIntegratedProxy({
   // Resolve a profile's display name for logs (historyStore is defined later, so
   // this is a lazy getter, only called at runtime when a stream opens).
   getProfileLabel: (ref) => historyStore.profileLabel(ref),
+  onStreamResult: (result) => relayWatch(result),
 });
 const saveSessions = () =>
   db.write("sessions", {
@@ -491,6 +498,7 @@ const historyStore = createHistoryStore({
   getIntervalMinutes: () => Number(panel.historySyncMinutes) || 30,
   isEnabled: () => panel.historySyncEnabled !== false,
   onSync: prewarmTmdb,
+  onReport: (report) => syncWatch(report),
   log: {
     info: (message, fields) => log.info("sync", message, fields),
     error: (message, fields) => log.warn("sync", message, fields),
@@ -651,13 +659,25 @@ async function token(a) {
     refreshing.set(
       a.id,
       (async () => {
-        const t = await call(
-          "/auth/v1/token?grant_type=refresh_token",
-          { refresh_token: a.refresh },
-          undefined,
-          "POST",
-          a.provider,
-        );
+        let t;
+        try {
+          t = await call(
+            "/auth/v1/token?grant_type=refresh_token",
+            { refresh_token: a.refresh },
+            undefined,
+            "POST",
+            a.provider,
+          );
+        } catch (error) {
+          // Refused session (not a network blip): the account must be reconnected.
+          if ((error.status === 401 || /refresh.?token|invalid.?grant|session/i.test(error.message)) && !a.authFailedAt) {
+            a.authFailedAt = Date.now();
+            save();
+            alert("reconnect", reconnectEmbed({ account: a.name || a.email || a.id, provider: providerOf(a.provider).label, error: error.message }, { origin: safeOrigin() }), "compte à reconnecter");
+          }
+          throw error;
+        }
+        delete a.authFailedAt;
         a.access = t.access_token;
         a.refresh = t.refresh_token;
         a.expires = Date.now() + t.expires_in * 1000;
@@ -682,6 +702,7 @@ async function addSession(t, providerId = "nuvio") {
     refresh: t.refresh_token,
     expires: Date.now() + t.expires_in * 1000,
   });
+  delete a.authFailedAt;
   save();
   log.info("account", isNew ? "compte connecté" : "session renouvelée", { account: a.email || a.id, provider: a.provider });
   return { id: a.id, email: a.email };
@@ -752,9 +773,16 @@ async function exportViaPull(a) {
 // triggered it concerns; `manual` backups are kept until deleted by hand.
 async function backup(a, reason, { manual = false, profileId = null } = {}) {
   const native = providerOf(a.provider).canBackup;
-  const snapshot = native
-    ? await rpc("sync_export_account_backup", {}, await token(a), a.provider)
-    : await exportViaPull(a);
+  let snapshot;
+  try {
+    snapshot = native ? await rpc("sync_export_account_backup", {}, await token(a), a.provider) : await exportViaPull(a);
+  } catch (error) {
+    if (!manual && cooled(`backup:${a.id}`, 30 * 60e3)) {
+      const profile = profileId == null ? "" : historyStore.profileLabel(`${a.id}:${profileId}`)?.profileName || `Profil ${profileId}`;
+      alert("backup", backupEmbed({ account: a.name || a.email || a.id, reason, profile, error: error.message }, { origin: safeOrigin() }), "sauvegarde échouée");
+    }
+    throw error;
+  }
   const id = crypto.randomUUID();
   db.write("backup-" + id, snapshot);
   state.backups.unshift({
@@ -967,6 +995,233 @@ const addonManifestKey = (url) => {
   }
   try { return normalizeManifestUrl(url); } catch { return String(url || ""); }
 };
+// Each library addon -> the profiles using it, with the proxy mode the manager
+// minted (relay grants) or "none" for an original URL. Built from the background
+// addon mirror (no network), so it is instant.
+function libraryUsage() {
+  const keyToId = new Map(state.library.map((item) => [addonManifestKey(item.url), item.id]));
+  const usage = Object.fromEntries(state.library.map((item) => [item.id, []]));
+  let oldest = 0;
+  for (const p of historyStore.getAddonUsage(state.accounts)) {
+    oldest = oldest ? Math.min(oldest, p.addonsSync) : p.addonsSync;
+    for (const row of p.addons) {
+      const id = keyToId.get(addonManifestKey(row.url));
+      if (!id) continue; // installed addon not in the manager's library
+      const ref = addonProxy.describe(row.url);
+      usage[id].push({
+        accountId: p.accountId,
+        accountName: p.accountName,
+        provider: p.providerId,
+        profileId: p.profileIndex,
+        profileName: p.profileName,
+        identity: p.identity,
+        mode: ref ? ref.mode : "none",
+        enabled: row.enabled !== false,
+      });
+    }
+  }
+  return { usage, oldest };
+}
+// Discord notifications (server/notifier.js). panel.discord = { webhookUrl,
+// name, events: { down, recovered, updated } }; every event is on by default.
+const discord = createDiscordNotifier({ getWebhook: () => panel.discord?.webhookUrl || "", log });
+setNotifierVersion(APP_VERSION.version);
+const discordEvents = () => Object.fromEntries(DISCORD_EVENTS.map((event) => [event, panel.discord?.events?.[event] !== false]));
+const discordSummary = () => ({
+  configured: Boolean(panel.discord?.webhookUrl),
+  name: panel.discord?.name || "",
+  events: discordEvents(),
+  summaryHour: Number.isInteger(panel.discord?.summaryHour) ? panel.discord.summaryHour : 20,
+  timeZone: panel.discord?.timeZone || "",
+});
+// Send when the event is switched on in the settings.
+function alert(event, embedValue, label) {
+  if (discordEvents()[event]) discord.notify(embedValue, label);
+}
+// At most one alert per key in `ms` (anti-spam).
+const cooldowns = new Map();
+const cooled = (key, ms) => {
+  if (Date.now() - (cooldowns.get(key) || 0) < ms) return false;
+  cooldowns.set(key, Date.now());
+  return true;
+};
+const safeOrigin = () => {
+  try {
+    return publicOrigin();
+  } catch {
+    return "";
+  }
+};
+const profilesUsing = (item) => [
+  ...new Set((libraryUsage().usage[item.id] || []).map((u) => u.identity?.name || u.profileName || `Profil ${u.profileId}`)),
+];
+// Library addon health (server/addon-health.js): checked from the server, and
+// through the external proxy as well when a profile uses that mode.
+let usageMemo = { at: 0, usage: {} };
+const addonHealth = createAddonHealth({
+  load: () => db.read("addon-health", { version: 1, items: {} }),
+  persist: (value) => db.write("addon-health", value),
+  getLibrary: () => state.library,
+  getModes: (item) => {
+    if (Date.now() - usageMemo.at > 10e3) usageMemo = { at: Date.now(), usage: libraryUsage().usage };
+    const external = effectiveProxyUrl() && (usageMemo.usage[item.id] || []).some((u) => u.mode === "warp");
+    return external ? ["direct", "warp"] : ["direct"];
+  },
+  probe: (url, mode) => addonProxy.probeManifest(url, mode),
+  onChange: (change) => {
+    const failing = change.after === "down" || change.after === "partial";
+    const recovered = change.after === "ok" && (change.before === "down" || change.before === "partial");
+    if (failing || recovered)
+      alert(failing ? "down" : "recovered", healthEmbed(change, { profiles: profilesUsing(change.item), origin: safeOrigin() }), `santé ${change.after}`);
+  },
+  onVersion: (change) => alert("updated", updateEmbed(change, { profiles: profilesUsing(change.item), origin: safeOrigin() }), "mise à jour"),
+  onContent: (change) => alert("changed", contentEmbed(change, { profiles: profilesUsing(change.item), origin: safeOrigin() }), "manifest modifié"),
+  afterRun: () => checkProxyHealth(),
+  getIntervalMinutes: () => Number(panel.addonHealthMinutes) || 15,
+  log,
+});
+
+// External proxy in use: checked after each addon health run; a failure is
+// confirmed a minute later before alerting, like the addons.
+let proxyWatch = { url: "", status: "unknown", since: 0 };
+async function checkProxyHealth(confirming = false) {
+  const url = effectiveProxyUrl();
+  if (!url) return void (proxyWatch = { url: "", status: "unknown", since: 0 });
+  if (proxyWatch.url !== url) proxyWatch = { url, status: "unknown", since: 0 };
+  const result = await addonProxy.test("warp", url);
+  const display = proxySummary(url).display;
+  if (result.ok) {
+    if (proxyWatch.status === "down") alert("proxy", proxyEmbed({ ok: true, display, since: proxyWatch.since, ip: result.ip }, { origin: safeOrigin() }), "proxy rétabli");
+    proxyWatch = { url, status: "ok", since: 0 };
+    return;
+  }
+  if (proxyWatch.status === "down") return;
+  if (!confirming) {
+    proxyWatch.suspect = Date.now();
+    setTimeout(() => checkProxyHealth(true).catch(() => {}), 60e3).unref?.();
+    return;
+  }
+  proxyWatch = { url, status: "down", since: proxyWatch.suspect || Date.now() };
+  log.warn("proxy", "proxy externe injoignable", { proxy: display });
+  alert("proxy", proxyEmbed({ ok: false, display, since: proxyWatch.since }, { origin: safeOrigin() }), "proxy injoignable");
+}
+// Several stream opens failing in a row at the relay (distinct links, within 10
+// minutes): one alert, then quiet for 30 minutes. A success resets the count.
+const relayFailures = [];
+function relayWatch({ ok, token, grant, reason }) {
+  if (ok) return void (relayFailures.length = 0);
+  const now = Date.now();
+  while (relayFailures.length && now - relayFailures[0].at > 10 * 60e3) relayFailures.shift();
+  if (relayFailures.some((f) => f.token === token)) return;
+  const label = grant ? historyStore.profileLabel(`${grant.accountId}:${grant.profileId ?? ""}`) : null;
+  relayFailures.push({ at: now, token, addon: grant?.name || "", logo: grant?.logo || "", profile: label?.profileName || "", reason });
+  if (relayFailures.length >= 3 && cooled("relay", 30 * 60e3)) {
+    alert("relay", relayEmbed([...relayFailures], { origin: safeOrigin() }), "lectures en échec");
+    relayFailures.length = 0;
+  }
+}
+// After each history sync: newly failing accounts / profiles (an account to
+// reconnect has its own alert), then new devices on the Nuvio accounts.
+let syncFailing = new Set();
+async function syncWatch({ failures }) {
+  const fresh = failures.filter((f) => !syncFailing.has(f.key) && !state.accounts.find((a) => a.id === f.accountId)?.authFailedAt);
+  syncFailing = new Set(failures.map((f) => f.key));
+  if (fresh.length) alert("sync", syncEmbed(fresh, { origin: safeOrigin() }), "synchronisation en échec");
+  await checkDevices();
+}
+// Devices signed in to each Nuvio account (Tuvora has no device list). The first
+// read of an account only records its devices; later reads announce new ones.
+async function checkDevices() {
+  if (!discordEvents().device || !panel.discord?.webhookUrl) return;
+  state.knownDevices ||= {};
+  let changed = false;
+  for (const a of state.accounts) {
+    if (providerOf(a.provider).id !== "nuvio" || a.authFailedAt) continue;
+    let rows;
+    try {
+      rows = await rpc("list_my_sessions", {}, await token(a), a.provider);
+    } catch (error) {
+      log.debug("account", "appareils non vérifiés", { account: a.email || a.id, error: error.message });
+      continue;
+    }
+    const devices = (Array.isArray(rows) ? rows : []).map((row) => ({
+      key: String(row.id || [row.created_at, row.client_name, row.device_name, row.platform].join("|")),
+      app: String(row.client_name || ""),
+      version: row.client_version ? String(row.client_version) : "",
+      platform: row.platform ? String(row.platform) : "",
+      name: row.device_name ? String(row.device_name) : "",
+      firstSeen: row.created_at || null,
+    }));
+    const known = state.knownDevices[a.id];
+    if (known) {
+      const fresh = devices.filter((d) => !known.includes(d.key));
+      for (const device of fresh.slice(0, 5))
+        alert("device", deviceEmbed({ account: a.name || a.email || a.id, device }, { origin: safeOrigin() }), "nouvel appareil");
+    }
+    const keys = devices.map((d) => d.key);
+    if (JSON.stringify(keys) !== JSON.stringify(known)) {
+      state.knownDevices[a.id] = keys;
+      changed = true;
+    }
+  }
+  if (changed) save();
+}
+// Failed sign-ins to the manager from one address: 5 within 15 minutes → one
+// alert per address and hour. A success clears the address.
+const loginFailures = new Map(); // ip -> [{ at, user }]
+function loginWatch(ip, ok, user = "") {
+  if (ok) return void loginFailures.delete(ip);
+  const now = Date.now();
+  const recent = (loginFailures.get(ip) || []).filter((f) => now - f.at < 15 * 60e3);
+  recent.push({ at: now, user: user.slice(0, 80) });
+  loginFailures.set(ip, recent);
+  if (recent.length >= 5 && cooled(`login:${ip}`, 60 * 60e3))
+    alert("login", loginEmbed({ ip, count: recent.length, minutes: 15, users: [...new Set(recent.map((f) => f.user).filter(Boolean))].slice(0, 5) }, { origin: safeOrigin() }), "connexions échouées");
+}
+// Daily summary at the chosen hour, in the time zone of the browser that saved
+// the setting (the server's own zone otherwise).
+const zonedParts = (ms, timeZone) => {
+  const options = { timeZone: timeZone || undefined, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" };
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat("en-CA", options).formatToParts(new Date(ms));
+  } catch {
+    parts = new Intl.DateTimeFormat("en-CA", { ...options, timeZone: undefined }).formatToParts(new Date(ms));
+  }
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  return { day: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) };
+};
+function buildSummary(now = Date.now()) {
+  const since = Math.max(Number(panel.discord?.summaryBase?.at) || 0, now - 864e5);
+  const profiles = [];
+  let watched = 0;
+  for (const p of historyStore.getDataset(state.accounts)) {
+    const events = p.events.filter((e) => e.at >= since && e.at <= now).sort((x, y) => y.at - x.at);
+    if (!events.length) continue;
+    watched += events.length;
+    const titles = [...new Set(events.map((e) => (e.kind === "episode" && e.season != null ? `${e.title} S${e.season}E${e.episode}` : e.title)).filter(Boolean))];
+    profiles.push({ name: p.profileName, count: events.length, titles: titles.slice(0, 3) });
+  }
+  profiles.sort((x, y) => y.count - x.count);
+  const opens = addonProxy.openEvents().filter((e) => e.at >= since).length;
+  const total = (Number(state.bandwidth?.direct) || 0) + (Number(state.bandwidth?.warp) || 0);
+  const base = panel.discord?.summaryBase;
+  const health = addonHealth.snapshot().items;
+  const failing = state.library.filter((item) => ["down", "partial"].includes(health[item.id]?.status)).map((item) => item.name);
+  const dateLabel = new Intl.DateTimeFormat("fr-FR", { timeZone: panel.discord?.timeZone || undefined, weekday: "long", day: "numeric", month: "long" }).format(new Date(now));
+  return { since, watched, opens, profiles, failing, dateLabel, bandwidth: base && total >= base.bytes ? total - base.bytes : null, total };
+}
+function summaryTick() {
+  if (!discordEvents().summary || !panel.discord?.webhookUrl) return;
+  const { day, hour } = zonedParts(Date.now(), panel.discord.timeZone);
+  if (hour < discordSummary().summaryHour || panel.discord.lastSummaryDay === day) return;
+  const summary = buildSummary();
+  panel.discord.lastSummaryDay = day;
+  panel.discord.summaryBase = { at: Date.now(), bytes: summary.total };
+  savePanel();
+  alert("summary", summaryEmbed(summary, { origin: safeOrigin() }), "résumé quotidien");
+}
+setInterval(summaryTick, 60e3).unref?.();
 // Manifest logo for a profile's installed addon, for the Addons editor. Reuses a
 // relay grant's logo or a library entry (no network), otherwise reads it from the
 // manifest once and caches it for an hour. LAN/private hosts return null (the
@@ -1209,6 +1464,7 @@ const server = http.createServer(async (req, res) => {
         attempts.set(ip, active);
         const okLogin = authEnabled() && equal(b.user, adminName()) && validPassword(b.password);
         log[okLogin ? "info" : "warn"]("auth", `connexion panel ${okLogin ? "réussie" : "échouée"}`, { user: String(b.user || "").slice(0, 80), ip });
+        loginWatch(ip, okLogin, String(b.user || ""));
         assert(okLogin, "Identifiants incorrects", 401);
         issueSession(res, req, "admin");
         return json(res, { ok: true });
@@ -1256,6 +1512,7 @@ const server = http.createServer(async (req, res) => {
         }
         if (!acc) {
           log.warn("auth", "connexion compte échouée", { email, ip });
+          loginWatch(ip, false, email);
           throw Object.assign(new Error("Identifiants incorrects"), { status: 401 });
         }
         if (data.access_token) {
@@ -1265,6 +1522,7 @@ const server = http.createServer(async (req, res) => {
           save();
         }
         log.info("auth", "connexion compte réussie", { email, provider: acc.provider, ip });
+        loginWatch(ip, true);
         issueSession(res, req, "nuvio", acc.id);
         return json(res, { ok: true });
       }
@@ -1304,12 +1562,12 @@ const server = http.createServer(async (req, res) => {
       const ADMIN_ONLY = new Set([
         "/api/settings", "/api/settings/tmdb", "/api/settings/proxy", "/api/settings/public-url",
         "/api/settings/proxy/test", "/api/settings/proxy/select", "/api/settings/proxy/remove", "/api/settings/admin", "/api/settings/admins", "/api/settings/trackers",
-        "/api/settings/history", "/api/history/status", "/api/history/sync",
+        "/api/settings/history", "/api/settings/addon-health", "/api/settings/discord", "/api/settings/discord/test", "/api/settings/discord/summary", "/api/settings/discord/remove", "/api/history/status", "/api/history/sync",
         "/api/settings/login",
         "/api/overview", "/api/metrics/history",
         "/api/pair/start", "/api/pair/poll",
         "/api/accounts/rename", "/api/accounts/remove", "/api/accounts/connect",
-        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/reconfigure", "/api/library/usage", "/api/library/assign-many", "/api/library/set-modes",
+        "/api/library/save", "/api/library/refresh-logos", "/api/library/remove", "/api/library/reconfigure", "/api/library/usage", "/api/library/health", "/api/library/health/check", "/api/library/assign-many", "/api/library/set-modes",
         "/api/backup/create", "/api/backup/delete", "/api/backup/restore", "/api/backup/restore-profile",
         "/api/backup/restore-file", "/api/backup/download",
       ]);
@@ -1369,7 +1627,68 @@ const server = http.createServer(async (req, res) => {
             intervalMinutes: Number(panel.historySyncMinutes) || 30,
             lastFullSync: historyStore.status().lastFullSync,
           },
+          addonHealth: { intervalMinutes: Number(panel.addonHealthMinutes) || 15 },
+          discord: discordSummary(),
         });
+      }
+      if (route === "/api/settings/discord") {
+        // New webhook (checked with Discord first) and/or the chosen events.
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const next = { ...(panel.discord || {}) };
+        if (typeof b.url === "string" && b.url.trim()) {
+          next.webhookUrl = normalizeWebhookUrl(b.url);
+          next.name = (await discord.inspect(next.webhookUrl)).name;
+        }
+        if (b.events && typeof b.events === "object")
+          next.events = Object.fromEntries(DISCORD_EVENTS.map((event) => [event, b.events[event] !== false]));
+        if (b.summaryHour !== undefined) {
+          const hour = Number(b.summaryHour);
+          assert(Number.isInteger(hour) && hour >= 0 && hour <= 23, "Heure entre 0 et 23");
+          next.summaryHour = hour;
+        }
+        if (typeof b.timeZone === "string" && b.timeZone) {
+          try {
+            new Intl.DateTimeFormat("fr-FR", { timeZone: b.timeZone });
+            next.timeZone = b.timeZone.slice(0, 64);
+          } catch {
+            assert(false, "Fuseau horaire inconnu");
+          }
+        }
+        panel.discord = next;
+        savePanel();
+        log.info("settings", "notifications Discord enregistrées", { webhook: next.name || "", events: Object.keys(discordEvents()).filter((e) => discordEvents()[e]).join(",") });
+        return json(res, { ok: true, ...discordSummary() });
+      }
+      if (route === "/api/settings/discord/test") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(panel.discord?.webhookUrl, "Aucun webhook Discord enregistré");
+        await discord.send(testEmbed({ origin: safeOrigin(), version: APP_VERSION.version }));
+        log.info("notify", "notification Discord de test envoyée");
+        return json(res, { ok: true });
+      }
+      if (route === "/api/settings/discord/summary") {
+        // Preview of the daily summary, now (does not move the daily window).
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        assert(panel.discord?.webhookUrl, "Aucun webhook Discord enregistré");
+        await discord.send(summaryEmbed(buildSummary(), { origin: safeOrigin() }));
+        return json(res, { ok: true });
+      }
+      if (route === "/api/settings/discord/remove") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        panel.discord = { events: panel.discord?.events, summaryHour: panel.discord?.summaryHour, timeZone: panel.discord?.timeZone };
+        savePanel();
+        log.info("settings", "webhook Discord supprimé");
+        return json(res, { ok: true, ...discordSummary() });
+      }
+      if (route === "/api/settings/addon-health") {
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        const minutes = Number(b.intervalMinutes);
+        assert(Number.isInteger(minutes) && minutes >= 5 && minutes <= 1440, "Intervalle entre 5 et 1440 minutes");
+        panel.addonHealthMinutes = minutes;
+        savePanel();
+        addonHealth.reschedule();
+        log.info("settings", "intervalle de vérification des addons", { minutes });
+        return json(res, { ok: true, intervalMinutes: minutes });
       }
       if (route === "/api/settings/history") {
         assert(req.method === "POST", "Méthode non autorisée", 405);
@@ -2249,6 +2568,7 @@ const server = http.createServer(async (req, res) => {
         state.library = state.library.filter((i) => i.id !== item.id);
         state.library.push(item);
         save();
+        addonHealth.check(item.id).catch(() => {});
         return json(res, item);
       }
       if (route === "/api/library/refresh-logos") {
@@ -2393,41 +2713,28 @@ const server = http.createServer(async (req, res) => {
         item.logo_checked_at = new Date().toISOString();
         save();
         log.info("library", "addon reconfiguré", { addon: item.name, profiles: updated.size, relayLinks: relinked });
+        addonHealth.check(item.id).catch(() => {});
         return json(res, { ok: true, updated: listRefs(updated), relinked, item });
       }
       if (route === "/api/library/usage") {
         assert(req.method === "GET", "Méthode non autorisée", 405);
-        // Map each library addon to the profiles that use it, with the proxy mode
-        // the manager minted (relay grants) or "none" for an original URL. Built
-        // from the background addon mirror so the page renders instantly.
-        const keyToId = new Map(
-          state.library.map((item) => [addonManifestKey(item.url), item.id]),
-        );
-        const usage = Object.fromEntries(state.library.map((item) => [item.id, []]));
-        let oldest = 0;
-        for (const p of historyStore.getAddonUsage(state.accounts)) {
-          oldest = oldest ? Math.min(oldest, p.addonsSync) : p.addonsSync;
-          for (const row of p.addons) {
-            const id = keyToId.get(addonManifestKey(row.url));
-            if (!id) continue; // installed addon not in the manager's library
-            const ref = addonProxy.describe(row.url);
-            usage[id].push({
-              accountId: p.accountId,
-              accountName: p.accountName,
-              provider: p.providerId,
-              profileId: p.profileIndex,
-              profileName: p.profileName,
-              identity: p.identity,
-              mode: ref ? ref.mode : "none",
-              enabled: row.enabled !== false,
-            });
-          }
-        }
+        const { usage, oldest } = libraryUsage();
         return json(res, {
           usage,
           syncedAt: oldest,
           synced: oldest > 0,
         });
+      }
+      if (route === "/api/library/health") {
+        assert(req.method === "GET", "Méthode non autorisée", 405);
+        return json(res, addonHealth.snapshot());
+      }
+      if (route === "/api/library/health/check") {
+        // One addon (id) or the whole library, now.
+        assert(req.method === "POST", "Méthode non autorisée", 405);
+        if (b.id) assert(await addonHealth.check(b.id), "Addon introuvable", 404);
+        else await addonHealth.checkAll({ explicit: true });
+        return json(res, addonHealth.snapshot());
       }
       if (route === "/api/library/assign-many") {
         // Push ONE library addon to several profiles at once (same proxy mode).
@@ -2925,10 +3232,18 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(port, host, () => {
   log.info("system", `Nuvio Manager démarré`, { url: `http://localhost:${server.address().port}`, version: APP_VERSION.version, logLevel: log.levelName });
+  if (!setupRequired()) {
+    alert("started", startedEmbed({ version: APP_VERSION.version, previous: panel.lastStartedVersion || "", origin: safeOrigin() }), "démarrage");
+    if (panel.lastStartedVersion !== APP_VERSION.version) {
+      panel.lastStartedVersion = APP_VERSION.version;
+      savePanel();
+    }
+  }
   if (authProxyEnabled())
     log.info("system", "Authentification par proxy externe activée (AUTH_PROXY)");
   // Start the background history mirror (initial fill + periodic refresh).
   if (!setupRequired()) historyStore.start();
+  if (!setupRequired()) addonHealth.start();
   nowPlaying.start();
   if (setupRequired())
     log.warn("system", "Configuration initiale requise : créer l’administrateur (UI) ou définir ADMIN_USERNAME/ADMIN_PASSWORD/PUBLIC_URL");
